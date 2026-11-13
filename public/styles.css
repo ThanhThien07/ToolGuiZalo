@@ -1,0 +1,292 @@
+/* ==========================================================================
+   ToolGuiZalo Pro Automation - Modern SaaS UI Stylesheet
+   Combines Bootstrap 5 utility foundation with high-end polished aesthetic
+   ========================================================================== */
+
+:root {
+  --zalo-blue: #0068ff;
+  --zalo-blue-dark: #0052cc;
+  --zalo-blue-light: #e8f2ff;
+  --success-emerald: #10b981;
+  --warning-amber: #f59e0b;
+  --danger-rose: #ef4444;
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-700: #334155;
+  --slate-900: #0f172a;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--slate-900);
+  background-color: #f8fafc !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ==================== BUTTONS ==================== */
+.btn-primary {
+  background: linear-gradient(180deg, #0068ff 0%, #0052cc 100%) !important;
+  border: none !important;
+  box-shadow: 0 2px 6px rgba(0, 104, 255, 0.28) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+.btn-primary:hover {
+  background: linear-gradient(180deg, #005ce6 0%, #0043a8 100%) !important;
+  box-shadow: 0 4px 12px rgba(0, 104, 255, 0.38) !important;
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-success {
+  background: linear-gradient(180deg, #10b981 0%, #059669 100%) !important;
+  border: none !important;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.28) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+.btn-success:hover {
+  background: linear-gradient(180deg, #059669 0%, #047857 100%) !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.38) !important;
+  transform: translateY(-1px);
+}
+.btn-success:active {
+  transform: translateY(0);
+}
+
+.btn-outline-primary {
+  border-color: #bfdbfe !important;
+  color: var(--zalo-blue) !important;
+  background: #ffffff !important;
+}
+.btn-outline-primary:hover {
+  background: #eff6ff !important;
+  border-color: var(--zalo-blue) !important;
+  color: var(--zalo-blue-dark) !important;
+}
+
+/* ==================== CARDS & CONTAINERS ==================== */
+.card {
+  border: 1px solid var(--slate-200) !important;
+  border-radius: 12px !important;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03) !important;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card-header {
+  border-top-left-radius: 12px !important;
+  border-top-right-radius: 12px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  background-color: #ffffff !important;
+}
+
+/* ==================== SIDEBAR STYLING ==================== */
+.sidebar-wrapper {
+  background: #ffffff;
+  border-right: 1px solid var(--slate-200);
+}
+
+.sidebar-nav-btn {
+  border: 1px solid transparent;
+  color: #475569 !important;
+  border-radius: 10px !important;
+  padding: 10px 14px !important;
+  transition: all 0.15s ease;
+  font-size: 13.5px;
+}
+
+.sidebar-nav-btn:hover {
+  background-color: #f8fafc !important;
+  color: var(--zalo-blue) !important;
+}
+
+.sidebar-nav-btn.active {
+  background-color: #eff6ff !important;
+  color: var(--zalo-blue) !important;
+  border-color: #bfdbfe !important;
+  font-weight: 700 !important;
+}
+
+.sidebar-nav-btn.active i {
+  color: var(--zalo-blue) !important;
+}
+
+/* ==================== STATUS INDICATOR DOTS ==================== */
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot-gray { background: #94a3b8; }
+.dot-amber { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2); }
+.dot-green { background: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25); }
+
+/* ==================== KPI STAT CARDS ==================== */
+.stat-card {
+  border-left: 4px solid #64748b !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08) !important;
+}
+.stat-total { border-left-color: #0068ff !important; }
+.stat-success { border-left-color: #10b981 !important; }
+.stat-blocked { border-left-color: #f59e0b !important; }
+.stat-unregistered { border-left-color: #ef4444 !important; }
+.stat-pending { border-left-color: #0ea5e9 !important; }
+
+/* ==================== PANEL MODE SWITCHING ==================== */
+.main-body.panel-mode-overview .panel-card:not(#panelOverview),
+.main-body.panel-mode-accounts .panel-card:not(#panelAccounts),
+.main-body.panel-mode-schedule .panel-card:not(#panelSchedule),
+.main-body.panel-mode-import .panel-card:not(#panelImport),
+.main-body.panel-mode-message .panel-card:not(#panelMessage),
+.main-body.panel-mode-table .panel-card:not(#panelTable),
+.main-body.panel-mode-replies .panel-card:not(#panelReplies) {
+  display: none !important;
+}
+
+/* ==================== BADGES & TAGS ==================== */
+.badge-THANH_CONG {
+  background-color: #dcfce7 !important;
+  color: #15803d !important;
+  border: 1px solid #bbf7d0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.badge-CHAN_NGUOI_LA {
+  background-color: #fef3c7 !important;
+  color: #b45309 !important;
+  border: 1px solid #fde68a;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.badge-KHONG_DANG_KY {
+  background-color: #fee2e2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fecaca;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.badge-PENDING {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border: 1px solid #e2e8f0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.badge-PROCESSING {
+  background-color: #dbeafe !important;
+  color: #1d4ed8 !important;
+  border: 1px solid #bfdbfe;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.badge-SAI_SO, .badge-LOI {
+  background-color: #fce7f3 !important;
+  color: #be185d !important;
+  border: 1px solid #fbcfe8;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* ==================== ACCOUNT LIST ROWS ==================== */
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: #ffffff;
+  transition: all 0.15s ease;
+}
+.account-row:hover {
+  border-color: #cbd5e1;
+  background-color: #f8fafc;
+}
+.account-row.active {
+  border-color: var(--zalo-blue);
+  background: #f8faff;
+  box-shadow: 0 2px 8px rgba(0, 104, 255, 0.1);
+}
+
+/* ==================== ATTACHED IMAGE THUMBNAILS ==================== */
+.img-thumb-item {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+}
+.img-thumb-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.img-thumb-item .btn-remove-thumb {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+}
+.img-thumb-item .btn-remove-thumb:hover {
+  background: #ef4444;
+}
+
+/* ==================== MODAL OVERLAY ==================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal-dialog-custom {
+  width: 100%;
+  max-width: 900px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ==================== FORM CONTROL FOCUS ==================== */
+.form-control:focus, .form-select:focus {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(0, 104, 255, 0.12);
+}
