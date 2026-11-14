@@ -52,7 +52,7 @@ class ZaloBot extends EventEmitter {
     this._isCheckingReplies = false;
 
     this.startScheduleWatcher();
-    this.startReplyWatcher(4000);
+    this.startReplyWatcher(1500);
     taskEngine.on('change', () => this.scheduleStatusBroadcast());
     // Tự động khôi phục chạy ngầm các tài khoản đã có thư mục lưu phiên đăng nhập
     setTimeout(() => {
@@ -685,11 +685,10 @@ class ZaloBot extends EventEmitter {
 
   // ===================== Quản lý phản hồi từ khách hàng =====================
 
-  startReplyWatcher(intervalMs = 4000) {
+  startReplyWatcher(intervalMs = 1500) {
     if (this._replyWatcher) return;
     this._replyWatcher = setInterval(async () => {
       if (this._isCheckingReplies) return;
-      // Nếu đang trong chiến dịch gửi thì chỉ quét nếu có tài khoản rảnh
       try {
         await this.checkReplies();
       } catch (err) {
@@ -706,10 +705,12 @@ class ZaloBot extends EventEmitter {
   }
 
   /**
-   * Quét kiểm tra phản hồi từ khách trên các tài khoản Zalo Web
+   * Quét kiểm tra phản hồi từ khách trên các tài khoản Zalo Web (Realtime & Sắp xếp mới nhất lên đầu)
    */
   async checkReplies(targetAccountId = null) {
-    if (this._isCheckingReplies) return { ok: true, foundCount: 0, replies: [] };
+    if (this._isCheckingReplies) {
+      return { ok: true, foundCount: 0, replies: storage.getRepliedContactsSorted() };
+    }
     this._isCheckingReplies = true;
 
     try {
@@ -721,7 +722,6 @@ class ZaloBot extends EventEmitter {
       });
 
       let foundRepliesCount = 0;
-      const contacts = storage.getContacts();
       const newReplies = [];
 
       const IGNORED_NAMES = [
@@ -733,7 +733,8 @@ class ZaloBot extends EventEmitter {
         'zalopay',
         'cloud cua toi',
         'tin nhan tu nguoi la',
-        'zstyle'
+        'zstyle',
+        'zbusiness'
       ];
 
       for (const acc of accountsToCheck) {
@@ -745,7 +746,7 @@ class ZaloBot extends EventEmitter {
             const items = Array.from(
               document.querySelectorAll('.conv-item.conv-rel, [data-id^="conv-item-"]')
             );
-            return items.map((el) => {
+            return items.map((el, idx) => {
               const titleEl = el.querySelector(
                 '.conv-item-title__name, .conv-item-title, [class*="title__name"]'
               );
@@ -761,7 +762,7 @@ class ZaloBot extends EventEmitter {
               const snippet = rawBody.replace(/\u00A0/g, ' ').trim();
               const hasUnread = !!badgeEl && badgeEl.offsetParent !== null;
               const isFromMe = /^bạn\s*:/i.test(snippet) || /^you\s*:/i.test(snippet);
-              return { name, snippet, isFromMe, hasUnread };
+              return { name, snippet, isFromMe, hasUnread, sidebarRank: idx };
             });
           });
 
@@ -794,8 +795,23 @@ class ZaloBot extends EventEmitter {
 
               if (customerMsgs.length === 0) return null;
               const lastCustMsg = customerMsgs[customerMsgs.length - 1];
-              const text = (lastCustMsg.innerText || '').replace(/\u00A0/g, ' ').trim();
-              return { name: openName, snippet: text, isFromMe: false, hasUnread: false };
+              let text = (lastCustMsg.innerText || '')
+                .replace(/\u00A0/g, ' ')
+                .replace(/\n?\b\d{1,2}:\d{2}\b(\s*(AM|PM|SA|CH))?\s*$/i, '')
+                .trim();
+              if (!text) {
+                const hasMedia = lastCustMsg.querySelector(
+                  'img, canvas, [class*="sticker"], [class*="photo"], [class*="image"]'
+                );
+                if (hasMedia) text = 'Sticker';
+              }
+              return {
+                name: openName,
+                snippet: text,
+                isFromMe: false,
+                hasUnread: false,
+                customerMsgCount: customerMsgs.length
+              };
             })
             .catch(() => null);
 
@@ -813,6 +829,10 @@ class ZaloBot extends EventEmitter {
                 normChatName: normName,
                 cleanChatName: cleanName,
                 primarySnippet: chat.snippet,
+                sidebarSnippet: chat.snippet,
+                hasUnread: Boolean(chat.hasUnread),
+                sidebarRank: typeof chat.sidebarRank === 'number' ? chat.sidebarRank : 999,
+                customerMsgCount: 0,
                 allSnippets: [chat.snippet]
               });
             } else {
@@ -825,13 +845,19 @@ class ZaloBot extends EventEmitter {
             const cleanOpen = stripDiacritics(normOpen);
             if (cleanOpen) {
               if (chatMap.has(cleanOpen)) {
-                chatMap.get(cleanOpen).allSnippets.push(openChatData.snippet);
+                const entry = chatMap.get(cleanOpen);
+                entry.allSnippets.push(openChatData.snippet);
+                entry.customerMsgCount = openChatData.customerMsgCount || 0;
               } else {
                 chatMap.set(cleanOpen, {
                   name: openChatData.name,
                   normChatName: normOpen,
                   cleanChatName: cleanOpen,
                   primarySnippet: openChatData.snippet,
+                  sidebarSnippet: '',
+                  hasUnread: false,
+                  sidebarRank: 0,
+                  customerMsgCount: openChatData.customerMsgCount || 0,
                   allSnippets: [openChatData.snippet]
                 });
               }
@@ -839,7 +865,16 @@ class ZaloBot extends EventEmitter {
           }
 
           for (const chatEntry of chatMap.values()) {
-            const { name: chatName, normChatName, cleanChatName, primarySnippet } = chatEntry;
+            const {
+              name: chatName,
+              normChatName,
+              cleanChatName,
+              primarySnippet,
+              sidebarSnippet,
+              hasUnread,
+              sidebarRank,
+              customerMsgCount
+            } = chatEntry;
             const allSnippets = Array.from(new Set(chatEntry.allSnippets.filter(Boolean)));
             if (!chatName || !primarySnippet) continue;
             if (primarySnippet.toLowerCase() === 'chưa có tin nhắn') continue;
@@ -848,14 +883,20 @@ class ZaloBot extends EventEmitter {
               IGNORED_NAMES.some((ig) => cleanChatName.includes(ig)) ||
               primarySnippet.includes('Đăng nhập Zalo trên máy tính') ||
               primarySnippet.includes('[Không có tin nhắn gần đây]') ||
+              primarySnippet.includes('[Tin nhắn đang đồng bộ]') ||
               primarySnippet.includes('Chưa có trong danh bạ') ||
               primarySnippet.toLowerCase() === 'chưa có tin nhắn'
             ) {
               continue;
             }
 
-            // Tìm contact tương ứng trong toàn bộ danh sách (hỗ trợ có dấu và không dấu)
-            const currentAllContacts = storage.getContacts();
+            // Ưu tiên tìm contact có SĐT thật trước, sau đó mới tới contact "Từ Zalo Web"
+            const currentAllContacts = storage.getContacts().slice().sort((a, b) => {
+              const aZw = !a.phone || a.phone === 'Từ Zalo Web' ? 1 : 0;
+              const bZw = !b.phone || b.phone === 'Từ Zalo Web' ? 1 : 0;
+              return aZw - bZw;
+            });
+
             const matched = currentAllContacts.find((c) => {
               const normZaloName = (c.zaloName || '').toLowerCase().trim();
               const normContactName = (c.name || '').toLowerCase().trim();
@@ -890,14 +931,42 @@ class ZaloBot extends EventEmitter {
                 matched.hasReplied &&
                 knownSnippets.length === 1 &&
                 allSnippets.includes(knownSnippets[0]);
+
+              // Phát hiện tin nhắn mới theo thời gian thực (kể cả khi khách gửi lại nội dung cũ hoặc Sticker mới):
+              const hasSidebarChanged = Boolean(
+                sidebarSnippet &&
+                  matched.lastSidebarSnippet &&
+                  sidebarSnippet !== matched.lastSidebarSnippet
+              );
+              const hasOpenCountIncreased = Boolean(
+                customerMsgCount > 0 &&
+                  matched.lastCustomerMsgCount > 0 &&
+                  customerMsgCount > matched.lastCustomerMsgCount
+              );
+              const hasNewUnread = Boolean(hasUnread && matched.lastUnreadState === false);
+
               const isBrandNewSnippet =
                 !matched.hasReplied ||
-                (!isSameStartupState && !knownSnippets.includes(primarySnippet));
+                (!isSameStartupState &&
+                  primarySnippet !== matched.replyText &&
+                  !knownSnippets.includes(primarySnippet)) ||
+                hasSidebarChanged ||
+                hasOpenCountIncreased ||
+                hasNewUnread;
+
               const mergedSnippets = Array.from(new Set([...knownSnippets, ...allSnippets]));
 
               if (!isBrandNewSnippet) {
+                // Cập nhật baseline theo dõi ngầm để lần quét kế tiếp (1.5s sau) bắt nhạy mọi thay đổi mới
+                matched.lastSidebarSnippet = sidebarSnippet || matched.lastSidebarSnippet || matched.replyText;
+                if (customerMsgCount > 0) matched.lastCustomerMsgCount = customerMsgCount;
+                matched.lastUnreadState = Boolean(hasUnread);
+                matched.sidebarRank = sidebarRank;
                 if (mergedSnippets.length > knownSnippets.length) {
-                  storage.updateContact(matched.id, { knownReplySnippets: mergedSnippets });
+                  storage.updateContact(matched.id, {
+                    knownReplySnippets: mergedSnippets,
+                    sidebarRank
+                  });
                 }
                 continue;
               }
@@ -909,12 +978,16 @@ class ZaloBot extends EventEmitter {
               const updated = storage.updateContact(matched.id, {
                 hasReplied: true,
                 replyText: primarySnippet,
-                replyAt: new Date().toISOString(),
+                replyAt: new Date(Date.now() - (sidebarRank || 0) * 5).toISOString(),
                 replyByAccount: acc.name,
                 replyByAccountId: acc.id,
                 knownReplySnippets: mergedSnippets,
                 replyNotified: true,
-                replySeen: shouldNotify ? false : Boolean(matched.replySeen)
+                replySeen: shouldNotify ? false : Boolean(matched.replySeen),
+                sidebarRank: 0,
+                lastSidebarSnippet: sidebarSnippet || primarySnippet,
+                lastCustomerMsgCount: customerMsgCount || matched.lastCustomerMsgCount || 0,
+                lastUnreadState: Boolean(hasUnread)
               });
               foundRepliesCount++;
               newReplies.push({
@@ -936,7 +1009,7 @@ class ZaloBot extends EventEmitter {
                 );
               }
             } else {
-              // Tự động tạo một liên hệ trong danh bạ để khách hàng hiển thị ngay trên bảng
+              // Tự động tạo một liên hệ trong danh bạ để khách hàng hiển thị ngay trên bảng (giữ đúng thứ tự trên xuống của Zalo Web)
               const autoCreated = storage.addContact({
                 name: chatName,
                 zaloName: chatName,
@@ -945,12 +1018,16 @@ class ZaloBot extends EventEmitter {
                 sentMessage: '(Đã gửi trên Zalo Web)',
                 hasReplied: true,
                 replyText: primarySnippet,
-                replyAt: new Date().toISOString(),
+                replyAt: new Date(Date.now() - (sidebarRank || 0) * 1000).toISOString(),
                 replyByAccount: acc.name,
                 replyByAccountId: acc.id,
                 replyNotified: true,
                 replySeen: false,
                 knownReplySnippets: allSnippets,
+                sidebarRank: sidebarRank || 0,
+                lastSidebarSnippet: sidebarSnippet || primarySnippet,
+                lastCustomerMsgCount: customerMsgCount || 0,
+                lastUnreadState: Boolean(hasUnread),
                 note: 'Khách phản hồi trực tiếp trên Zalo Web'
               });
               foundRepliesCount++;
@@ -977,15 +1054,15 @@ class ZaloBot extends EventEmitter {
         }
       }
 
+      const sortedReplies = storage.getRepliedContactsSorted();
       if (newReplies.length > 0) {
-        this.emit('replies_updated', storage.getContacts().filter((c) => c.hasReplied));
+        this.emit('replies_updated', sortedReplies);
       }
 
-      const replies = storage.getContacts().filter((c) => c.hasReplied && c.replyText);
       return {
         ok: true,
         foundCount: foundRepliesCount,
-        replies
+        replies: sortedReplies
       };
     } finally {
       this._isCheckingReplies = false;

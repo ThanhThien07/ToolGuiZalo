@@ -754,18 +754,18 @@
           </div>
         </div>
 
-        <!-- ==================== PANEL 7: ĐỒNG BỘ HÓA ĐA MÁY (P2P LAN SYNC) ==================== -->
+        <!-- ==================== PANEL 7: ĐỒNG BỘ QUA TRẠM TRUNG CHUYỂN CHÍNH (MASTER HUB SYNC) ==================== -->
         <div class="card shadow-sm mb-3 panel-card" id="panelSync" data-panel="sync">
           <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div>
               <h6 class="m-0 fw-bold text-dark d-flex align-items-center gap-2">
-                <i class="bi bi-diagram-3-fill text-info"></i>
-                <span>7. Đồng Bộ Hóa Đa Máy & Tự Động Gộp Bản Mới Nhất (P2P LAN Sync)</span>
+                <i class="bi bi-hdd-network-fill text-primary"></i>
+                <span>7. Trạm Trung Chuyển Chính & Đồng Bộ Đa Máy (Hỗ trợ cả khác mạng Wi-Fi)</span>
               </h6>
-              <small class="text-muted">Tự động kết nối và đồng bộ hai chiều giữa các máy cùng mở tool trong mạng. Bên nào có dữ liệu mới hơn sẽ tự động gộp!</small>
+              <small class="text-muted">Các máy làm việc riêng độc lập. Khi bấm <b>"⚡ Đồng Bộ Ngay"</b>: Các máy con gửi dữ liệu về Máy Chính ➔ Máy Chính gộp & sắp xếp thành 1 bản đầy đủ ➔ Phát lại cho toàn bộ các máy!</small>
             </div>
             <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-primary btn-sm fw-semibold d-flex align-items-center gap-1 shadow-sm" id="btnTriggerSyncNow" type="button">
+              <button class="btn btn-primary btn-sm fw-bold d-flex align-items-center gap-1 px-3 py-2 shadow-sm" id="btnTriggerSyncNow" type="button">
                 <i class="bi bi-arrow-repeat"></i>
                 <span>⚡ Đồng Bộ Ngay</span>
               </button>
@@ -773,45 +773,57 @@
           </div>
 
           <div class="card-body">
-            <!-- Thông tin máy này -->
+            <!-- Thông tin Trạm Chính & Liên kết IP -->
             <div class="row g-3 mb-3">
               <div class="col-md-6">
                 <div class="border rounded-3 p-3 bg-light h-100">
                   <div class="d-flex align-items-center justify-content-between mb-2">
-                    <span class="small fw-bold text-dark">🖥️ Thông tin máy này:</span>
-                    <span class="badge bg-success-subtle text-success border border-success-subtle" id="badgeLocalSyncStatus">🟢 Đang phát tín hiệu P2P</span>
+                    <span class="small fw-bold text-dark">🖥️ Thông tin & Vai trò máy này:</span>
+                    <span class="badge bg-primary" id="badgeLocalSyncStatus">👑 TRẠM TRUNG CHUYỂN CHÍNH</span>
                   </div>
                   <div class="small mb-1">
-                    <span class="text-muted">Tên máy:</span> <strong id="lblSyncLocalHostname">Đang tải...</strong>
+                    <span class="text-muted">Tên máy hiện tại:</span> <strong id="lblSyncLocalHostname">Đang tải...</strong>
                   </div>
                   <div class="small mb-1">
-                    <span class="text-muted">Địa chỉ IP nội bộ:</span> <code class="fw-bold text-primary fs-6" id="lblSyncLocalIp">Đang nhận diện...</code>
+                    <span class="text-muted">IP Internet (Khác Wi-Fi):</span> <code class="fw-bold text-danger fs-6" id="lblSyncPublicIp">Đang nhận diện...</code>
                   </div>
-                  <small class="text-muted d-block mt-2" style="font-size: 11px;">
-                    💡 Máy tính khác mở tool cùng mạng Wi-Fi/LAN sẽ tự động tìm thấy máy này và đồng bộ không cần cấu hình!
-                  </small>
+                  <div class="small mb-2">
+                    <span class="text-muted">IP Nội bộ (Cùng Wi-Fi):</span> <code class="fw-bold text-primary" id="lblSyncLocalIp">Đang nhận diện...</code>
+                  </div>
+                  <div class="d-flex align-items-center gap-2 pt-2 border-top">
+                    <span class="small text-muted">Chế độ máy này:</span>
+                    <select class="form-select form-select-sm w-auto" id="selSyncNodeRole">
+                      <option value="MASTER">👑 Máy Trạm Chính (Tổng hợp dữ liệu)</option>
+                      <option value="CLIENT">💻 Máy Trạm Con (Gửi về Máy Chính)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <!-- Thêm kết nối thủ công nếu khác mạng/VPN -->
+              <!-- Liên kết IP Máy Trạm Chính -->
               <div class="col-md-6">
                 <div class="border rounded-3 p-3 bg-light h-100">
-                  <span class="small fw-bold text-dark d-block mb-2">🔗 Kết nối thủ công tới máy khác (nếu cần):</span>
-                  <div class="input-group input-group-sm mb-2">
-                    <input type="text" class="form-control" id="txtManualPeerIp" placeholder="Nhập IP máy kia (VD: 192.168.1.50 hoặc 10.0.0.5)..." />
-                    <button class="btn btn-info fw-semibold text-white" id="btnAddManualPeer" type="button">+ Kết nối</button>
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-bold text-dark">🔗 Liên kết tới IP Máy Trạm Chính (Máy của bạn):</span>
+                    <span class="badge bg-success-subtle text-success border border-success-subtle" id="badgeMasterTargetHost">Trạm: LAPTOP-0SNHPCGD</span>
                   </div>
-                  <small class="text-muted d-block" style="font-size: 11px;">
-                    Dùng khi 2 máy ở 2 mạng LAN khác nhau nhưng thông qua VPN hoặc IP tĩnh.
-                  </small>
+                  <div class="input-group input-group-sm mb-2">
+                    <span class="input-group-text bg-white fw-semibold text-muted">IP Trạm Chính:</span>
+                    <input type="text" class="form-control fw-semibold text-primary" id="txtManualPeerIp" placeholder="VD: 58.187.250.105 hoặc 192.168.1.153" />
+                    <button class="btn btn-primary fw-semibold" id="btnAddManualPeer" type="button">🔗 Liên kết IP</button>
+                  </div>
+                  <div class="p-2 bg-white rounded-2 border small text-muted" style="font-size: 11.5px; line-height: 1.45;">
+                    <div>✅ <b>Đã nhúng sẵn IP máy chính của bạn</b> khi gửi file cho máy khác (dù máy kia dùng <b>Wi-Fi khác</b> ở nơi khác vẫn tự liên kết về máy bạn).</div>
+                    <div class="mt-1">🔄 <b>Chu trình khi bấm Đồng Bộ:</b> Máy con đẩy toàn bộ dữ liệu về IP Máy Chính ➔ Máy Chính sắp xếp lại thành 1 bản cập nhật đầy đủ nhất ➔ Gửi trả lại cho tất cả các máy.</div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Danh sách các máy đã kết nối trong mạng -->
+            <!-- Danh sách các máy đã liên kết với Trạm Chính -->
             <div class="border rounded-3 overflow-hidden">
               <div class="bg-light p-2 border-bottom fw-bold small text-dark d-flex align-items-center justify-content-between">
-                <span>👥 Danh Sách Các Máy Đang Kết Nối Trong Mạng LAN:</span>
+                <span>🌐 Danh Sách Các Máy Đang Liên Kết Với Trạm Trung Chuyển Chính (Mọi Wi-Fi):</span>
                 <span class="badge bg-primary" id="lblPeersConnectedCount">0 máy</span>
               </div>
               <div class="table-responsive">
@@ -819,16 +831,16 @@
                   <thead class="table-light">
                     <tr>
                       <th>Tên Máy</th>
-                      <th>Địa Chỉ IP & Cổng</th>
-                      <th>Trạng Thái</th>
+                      <th>Địa Chỉ IP</th>
+                      <th>Kênh Kết Nối</th>
                       <th>Lần Gặp Cuối</th>
-                      <th class="text-end">Hành Động</th>
+                      <th class="text-end">Thao Tác</th>
                     </tr>
                   </thead>
                   <tbody id="tblSyncPeersBody">
                     <tr>
                       <td colspan="5" class="text-center py-4 text-muted small">
-                        Chưa phát hiện máy nào khác trong mạng. Khi có người mở tool trên máy khác, máy đó sẽ tự động xuất hiện tại đây!
+                        Các máy đang chạy độc lập. Bấm <b>"⚡ Đồng Bộ Ngay"</b> để thu thập dữ liệu về Máy Chính, sắp xếp thành bản đầy đủ và đồng bộ cho các máy!
                       </td>
                     </tr>
                   </tbody>

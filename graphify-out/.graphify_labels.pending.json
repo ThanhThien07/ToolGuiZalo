@@ -10,5 +10,11 @@
   "8": "applySettingsToForm",
   "9": "collectSettingsFromForm",
   "10": "TaskEngine",
-  "11": "P2PSyncEngine"
+  "11": "P2PSyncEngine",
+  "12": "with",
+  "13": "steps",
+  "14": "p2pSync.js",
+  "15": "zaloBot.js",
+  "16": "storage.js",
+  "17": "renderMessage"
 }

@@ -50,6 +50,7 @@ class Storage {
   constructor() {
     this.ensureDir();
     this.state = this.load();
+    this.save();
   }
 
   ensureDir() {
@@ -291,6 +292,15 @@ class Storage {
 
   deduplicateContacts(contacts) {
     if (!Array.isArray(contacts)) return [];
+    const stripAccents = (s) =>
+      String(s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .trim();
+
     const byKey = new Map();
     for (const c of contacts) {
       if (!c) continue;
@@ -355,7 +365,82 @@ class Storage {
         );
       }
     }
+
+    // Gộp các bản ghi "Từ Zalo Web" trùng tên với SĐT thật đã có tên Zalo (ví dụ: Khiêm - 0367982231 và Khiêm - Từ Zalo Web)
+    const phoneEntries = [];
+    const zaloWebKeysToDelete = [];
+    for (const [k, val] of byKey.entries()) {
+      if (k.startsWith('phone__')) {
+        phoneEntries.push([k, val]);
+      }
+    }
+
+    for (const [k, zw] of byKey.entries()) {
+      if (!k.startsWith('zaloweb__')) continue;
+      const zwClean = stripAccents(zw.name || zw.zaloName);
+      if (!zwClean) continue;
+
+      const matchedPhoneEntry = phoneEntries.find(([, ph]) => {
+        const phNameClean = stripAccents(ph.name);
+        const phZaloClean = stripAccents(ph.zaloName);
+        return (phNameClean && phNameClean === zwClean) || (phZaloClean && phZaloClean === zwClean);
+      });
+
+      if (matchedPhoneEntry) {
+        const [phKey, ph] = matchedPhoneEntry;
+        const phReplyMs = ph.replyAt ? new Date(ph.replyAt).getTime() : 0;
+        const zwReplyMs = zw.replyAt ? new Date(zw.replyAt).getTime() : 0;
+        const useZwReply = zw.hasReplied && (!ph.hasReplied || zwReplyMs > phReplyMs);
+        const mergedSnippets = Array.from(
+          new Set([
+            ...(ph.knownReplySnippets || []),
+            ...(zw.knownReplySnippets || []),
+            ph.replyText,
+            zw.replyText
+          ].filter(Boolean))
+        );
+        byKey.set(phKey, {
+          ...ph,
+          hasReplied: Boolean(ph.hasReplied || zw.hasReplied),
+          replyText: useZwReply ? zw.replyText || ph.replyText : ph.replyText || zw.replyText || '',
+          replyAt: useZwReply ? zw.replyAt || ph.replyAt : ph.replyAt || zw.replyAt || '',
+          replyByAccount: useZwReply
+            ? zw.replyByAccount || ph.replyByAccount
+            : ph.replyByAccount || zw.replyByAccount || '',
+          replyByAccountId: useZwReply
+            ? zw.replyByAccountId || ph.replyByAccountId
+            : ph.replyByAccountId || zw.replyByAccountId || '',
+          knownReplySnippets: mergedSnippets
+        });
+        zaloWebKeysToDelete.push(k);
+      }
+    }
+
+    for (const k of zaloWebKeysToDelete) {
+      byKey.delete(k);
+    }
+
     return Array.from(byKey.values());
+  }
+
+  /**
+   * Trả về danh sách khách hàng đã phản hồi được sắp xếp MỚI NHẤT LÊN ĐẦU (theo replyAt giảm dần)
+   */
+  getRepliedContactsSorted() {
+    const deduped = this.deduplicateContacts(this.state.contacts);
+    return deduped
+      .filter((c) => c && (c.hasReplied || c.replyText))
+      .sort((a, b) => {
+        const tA = a.replyAt ? new Date(a.replyAt).getTime() : 0;
+        const tB = b.replyAt ? new Date(b.replyAt).getTime() : 0;
+        if (tB !== tA) return tB - tA;
+        const rA = typeof a.sidebarRank === 'number' ? a.sidebarRank : 9999;
+        const rB = typeof b.sidebarRank === 'number' ? b.sidebarRank : 9999;
+        if (rA !== rB) return rA - rB;
+        const uA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const uB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return uB - uA;
+      });
   }
 
   addContact(contactData) {
@@ -492,37 +577,57 @@ class Storage {
           const remTime = remC.updatedAt ? new Date(remC.updatedAt).getTime() : 0;
           const locTime = locC.updatedAt ? new Date(locC.updatedAt).getTime() : 0;
 
-          // Nếu bản từ máy kia mới hơn bản trên máy này
-          if (remTime > locTime) {
-            const mergedResults = { ...(locC.results || {}), ...(remC.results || {}) };
-            this.state.contacts[localIdx] = {
-              ...locC,
-              ...remC,
-              results: mergedResults,
-              updatedAt: remC.updatedAt || new Date().toISOString()
-            };
-            updatedContactsCount++;
-            changed = true;
-          } else {
-            // Ngay cả khi bản local mới hơn, nếu máy kia có kết quả gửi của nick mới, gộp vào!
-            if (remC.results && Object.keys(remC.results).length > 0) {
-              const prevResultsKeys = Object.keys(locC.results || {});
-              const newResults = { ...(remC.results || {}), ...(locC.results || {}) };
-              if (Object.keys(newResults).length > prevResultsKeys.length) {
-                locC.results = newResults;
-                changed = true;
+          const isProcessed = (st) => ['THANH_CONG', 'CHAN_NGUOI_LA', 'KHONG_DANG_KY'].includes(st);
+          const locDone = isProcessed(locC.status);
+          const remDone = isProcessed(remC.status);
+
+          const mergedResults = { ...(locC.results || {}), ...(remC.results || {}) };
+          const mergedSnippets = Array.from(
+            new Set([
+              ...(locC.knownReplySnippets || []),
+              ...(remC.knownReplySnippets || []),
+              locC.replyText,
+              remC.replyText
+            ].filter(Boolean))
+          );
+
+          // Hợp nhất thông tin phản hồi theo thời gian phản hồi mới nhất
+          const locReplyTime = locC.replyAt ? new Date(locC.replyAt).getTime() : 0;
+          const remReplyTime = remC.replyAt ? new Date(remC.replyAt).getTime() : 0;
+          const useRemReply = remC.hasReplied && (!locC.hasReplied || remReplyTime >= locReplyTime);
+
+          const replyPatch = useRemReply
+            ? {
+                hasReplied: true,
+                replyText: remC.replyText || locC.replyText,
+                replyAt: remC.replyAt || locC.replyAt,
+                replyByAccount: remC.replyByAccount || locC.replyByAccount,
+                replyByAccountId: remC.replyByAccountId || locC.replyByAccountId,
+                knownReplySnippets: mergedSnippets
               }
-            }
-            // Nếu máy kia có phản hồi mới từ khách hàng mà máy này chưa có
-            if (remC.hasReplied && !locC.hasReplied) {
-              locC.hasReplied = true;
-              locC.replyText = remC.replyText;
-              locC.replyAt = remC.replyAt;
-              locC.replyByAccount = remC.replyByAccount;
-              locC.replyByAccountId = remC.replyByAccountId;
-              changed = true;
-            }
-          }
+            : {
+                hasReplied: Boolean(locC.hasReplied || remC.hasReplied),
+                replyText: locC.replyText || remC.replyText || '',
+                replyAt: locC.replyAt || remC.replyAt || '',
+                replyByAccount: locC.replyByAccount || remC.replyByAccount || '',
+                replyByAccountId: locC.replyByAccountId || remC.replyByAccountId || '',
+                knownReplySnippets: mergedSnippets
+              };
+
+          // Quyết định bản ghi gốc theo trạng thái đã xử lý và thời gian mới nhất
+          const preferRemoteStatus = (remDone && !locDone) || (remDone === locDone && remTime > locTime);
+          const baseRecord = preferRemoteStatus ? { ...locC, ...remC } : { ...remC, ...locC };
+
+          this.state.contacts[localIdx] = {
+            ...baseRecord,
+            results: mergedResults,
+            ...replyPatch,
+            updatedAt: Math.max(remTime, locTime)
+              ? new Date(Math.max(remTime, locTime)).toISOString()
+              : new Date().toISOString()
+          };
+          updatedContactsCount++;
+          changed = true;
         } else {
           // Contact mới hoàn toàn từ máy khác -> thêm vào máy này!
           this.state.contacts.push({
@@ -535,6 +640,9 @@ class Storage {
       }
     }
 
+    // 3. Lọc trùng và sắp xếp lại toàn bộ danh sách chuẩn chỉnh trên Trạm Chính
+    this.state.contacts = this.sortAndConsolidateContacts(this.state.contacts);
+
     if (changed) {
       this.state.lastUpdated = new Date().toISOString();
       this.save();
@@ -546,6 +654,35 @@ class Storage {
       newContactsCount,
       totalContacts: this.state.contacts.length
     };
+  }
+
+  /**
+   * Sắp xếp và chuẩn hóa toàn bộ danh sách liên hệ thành 1 bản đầy đủ có trật tự
+   */
+  sortAndConsolidateContacts(contacts) {
+    const deduped = this.deduplicateContacts(contacts);
+    const statusWeight = {
+      THANH_CONG: 1,
+      CHAN_NGUOI_LA: 2,
+      KHONG_DANG_KY: 3,
+      PROCESSING: 4,
+      PENDING: 5,
+      LOI: 6,
+      SAI_SO: 7
+    };
+    return deduped.sort((a, b) => {
+      const aZaloWeb = !a.phone || a.phone === 'Từ Zalo Web' ? 1 : 0;
+      const bZaloWeb = !b.phone || b.phone === 'Từ Zalo Web' ? 1 : 0;
+      if (aZaloWeb !== bZaloWeb) return aZaloWeb - bZaloWeb;
+
+      const wA = statusWeight[a.status] || 8;
+      const wB = statusWeight[b.status] || 8;
+      if (wA !== wB) return wA - wB;
+
+      const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return tB - tA;
+    });
   }
 
   clearPhoneCache() {

@@ -675,7 +675,7 @@ app.post('/api/orchestrator/mode', (req, res) => {
 // ===================== API Quản lý khách hàng phản hồi =====================
 
 app.get('/api/replies', (req, res) => {
-  const replies = storage.getContacts().filter((c) => c.hasReplied || c.replyText);
+  const replies = storage.getRepliedContactsSorted();
   res.json({ ok: true, replies });
 });
 
@@ -719,7 +719,7 @@ app.post('/api/browser/open-chat', async (req, res) => {
 });
 
 app.get('/api/reports/export-replies-excel', (req, res) => {
-  const replies = storage.getContacts().filter((c) => c.hasReplied || c.replyText);
+  const replies = storage.getRepliedContactsSorted();
   const rows = replies.map((c, idx) => ({
     STT: idx + 1,
     SDT: c.phone || c.rawPhone,
@@ -794,9 +794,35 @@ app.post('/api/sync/merge', (req, res) => {
   }
 });
 
+app.post('/api/sync/hub-exchange', async (req, res) => {
+  try {
+    const clientIp =
+      (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '')
+        .replace(/^::ffff:/, '')
+        .trim();
+    const result = await p2pSync.handleDirectClientExchange(req.body || {}, clientIp);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/config', (req, res) => {
+  try {
+    const info = p2pSync.setMasterHubConfig(req.body || {});
+    broadcastSSE('sync_status', info);
+    res.json({ ok: true, ...info });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/sync/trigger', async (req, res) => {
   try {
     const result = await p2pSync.syncAll();
+    broadcastSSE('contacts_replaced', storage.getContacts());
+    broadcastSSE('status', zaloBot.getStatus());
+    broadcastSSE('sync_status', p2pSync.getInfo());
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -806,9 +832,10 @@ app.post('/api/sync/trigger', async (req, res) => {
 app.post('/api/sync/add-peer', (req, res) => {
   try {
     const { ip, port } = req.body || {};
-    if (!ip) return res.status(400).json({ error: 'Vui lòng nhập địa chỉ IP máy cần đồng bộ' });
+    if (!ip) return res.status(400).json({ error: 'Vui lòng nhập địa chỉ IP Trạm Chính cần liên kết' });
     const ok = p2pSync.addManualPeer(ip, port || 3000);
-    res.json({ ok, peers: p2pSync.getInfo().peers });
+    broadcastSSE('sync_status', p2pSync.getInfo());
+    res.json({ ok, ...p2pSync.getInfo() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -245,13 +245,20 @@ function connectSSE() {
     } catch (err) {}
   });
 
-  evtSource.addEventListener('peer_connected', (e) => {
-    try {
-      const peer = JSON.parse(e.data);
-      showReplyToast(`Phát hiện máy "${peer.hostname}" (${peer.ip})`, 'Đã kết nối và tự động đồng bộ hai chiều', 'P2P LAN Sync');
-      loadSyncInfo();
-    } catch (err) {}
+  evtSource.addEventListener('peer_connected', () => {
+    loadSyncInfo();
   });
+
+  evtSource.onopen = () => {
+    loadReplies();
+  };
+
+  // Bổ sung vòng lặp đồng bộ realtime mỗi 2.5 giây cho danh sách phản hồi để đảm bảo 100% không bao giờ trễ nhịp
+  if (!window._realtimeRepliesTimer) {
+    window._realtimeRepliesTimer = setInterval(() => {
+      loadReplies();
+    }, 2500);
+  }
 }
 
 function toLocalDatetimeInputValue(isoStr) {
@@ -513,9 +520,18 @@ function upsertContactInState(incoming) {
   }
 }
 
+function stripTextAccents(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
 function getUniqueRepliedContacts() {
-  const seenKeys = new Set();
-  const list = [];
+  const byKey = new Map();
   for (const c of state.contacts || []) {
     if (!c || (!c.hasReplied && !c.replyText)) continue;
     const isFromZaloWeb = !c.phone || c.phone === 'Từ Zalo Web';
@@ -525,12 +541,65 @@ function getUniqueRepliedContacts() {
     const key = isFromZaloWeb
       ? `zw__${normName}__${c.replyByAccountId || c.replyByAccount || ''}`
       : `ph__${c.phone}`;
-    if (seenKeys.has(key) || (c.id && seenKeys.has(`id__${c.id}`))) continue;
-    seenKeys.add(key);
-    if (c.id) seenKeys.add(`id__${c.id}`);
-    list.push(c);
+
+    if (!byKey.has(key)) {
+      byKey.set(key, { ...c });
+    } else {
+      const prev = byKey.get(key);
+      const prevMs = prev.replyAt ? new Date(prev.replyAt).getTime() : 0;
+      const curMs = c.replyAt ? new Date(c.replyAt).getTime() : 0;
+      byKey.set(key, curMs >= prevMs ? { ...prev, ...c } : { ...c, ...prev });
+    }
   }
-  return list;
+
+  // Gộp bản ghi "Từ Zalo Web" trùng tên với khách đã có SĐT thật
+  const phoneItems = [];
+  const zwKeysToRemove = [];
+  for (const [k, val] of byKey.entries()) {
+    if (k.startsWith('ph__')) phoneItems.push([k, val]);
+  }
+  for (const [k, zw] of byKey.entries()) {
+    if (!k.startsWith('zw__')) continue;
+    const zwClean = stripTextAccents(zw.name || zw.zaloName);
+    if (!zwClean) continue;
+    const match = phoneItems.find(([, ph]) => {
+      const n1 = stripTextAccents(ph.name);
+      const n2 = stripTextAccents(ph.zaloName);
+      return (n1 && n1 === zwClean) || (n2 && n2 === zwClean);
+    });
+    if (match) {
+      const [phKey, ph] = match;
+      const phMs = ph.replyAt ? new Date(ph.replyAt).getTime() : 0;
+      const zwMs = zw.replyAt ? new Date(zw.replyAt).getTime() : 0;
+      if (zwMs > phMs) {
+        byKey.set(phKey, {
+          ...ph,
+          hasReplied: true,
+          replyText: zw.replyText || ph.replyText,
+          replyAt: zw.replyAt || ph.replyAt,
+          replyByAccount: zw.replyByAccount || ph.replyByAccount,
+          replyByAccountId: zw.replyByAccountId || ph.replyByAccountId
+        });
+      }
+      zwKeysToRemove.push(k);
+    }
+  }
+  for (const k of zwKeysToRemove) {
+    byKey.delete(k);
+  }
+
+  // Sắp xếp tin nhắn được phản hồi MỚI NHẤT LÊN ĐẦU (Realtime)
+  return Array.from(byKey.values()).sort((a, b) => {
+    const tA = a.replyAt ? new Date(a.replyAt).getTime() : 0;
+    const tB = b.replyAt ? new Date(b.replyAt).getTime() : 0;
+    if (tB !== tA) return tB - tA;
+    const rA = typeof a.sidebarRank === 'number' ? a.sidebarRank : 9999;
+    const rB = typeof b.sidebarRank === 'number' ? b.sidebarRank : 9999;
+    if (rA !== rB) return rA - rB;
+    const uA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+    const uB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    return uB - uA;
+  });
 }
 
 async function markRepliesSeenOnServer(contactId = null) {
@@ -614,15 +683,20 @@ function renderReplies() {
       const zaloAccName = c.replyByAccount || c.sentByAccount || 'Tài khoản Zalo';
       const isDefaultAcc = zaloAccName.includes('#1') || zaloAccName.includes('Mặc định');
       const badgeClass = isDefaultAcc ? 'bg-primary' : 'bg-info text-dark';
+      const replyMs = c.replyAt ? new Date(c.replyAt).getTime() : 0;
+      const isVeryRecent = replyMs > 0 && Date.now() - replyMs < 20000;
       const replyTime = c.replyAt ? new Date(c.replyAt).toLocaleString('vi-VN') : 'Vừa xong';
       const sentTime = c.sentAt ? new Date(c.sentAt).toLocaleString('vi-VN') : '';
       const safeName = escapeHtml(c.name || c.zaloName || '').replace(/'/g, "\\'");
 
       return `
-        <tr>
-          <td class="text-muted small">${index + 1}</td>
+        <tr style="${isVeryRecent ? 'background-color: rgba(22, 163, 74, 0.06); transition: background-color 0.3s ease;' : ''}">
+          <td class="text-muted small fw-semibold">${index + 1}</td>
           <td>
-            <div class="fw-bold text-dark">${escapeHtml(c.name || c.zaloName || 'Khách hàng')}</div>
+            <div class="fw-bold text-dark d-flex align-items-center gap-1 flex-wrap">
+              <span>${escapeHtml(c.name || c.zaloName || 'Khách hàng')}</span>
+              ${isVeryRecent ? '<span class="badge bg-danger" style="font-size:10px;">MỚI</span>' : ''}
+            </div>
             ${c.zaloName && c.zaloName !== c.name ? `<small class="text-muted d-block">${escapeHtml(c.zaloName)}</small>` : ''}
           </td>
           <td>
@@ -1887,14 +1961,18 @@ if (btnCloseBrowser) {
   });
 }
 
-// ==================== PANEL 7: P2P LAN SYNCHRONIZATION ====================
+// ==================== PANEL 7: MASTER HUB & CROSS-WIFI IP SYNCHRONIZATION ====================
 
 const btnTriggerSyncNow = document.getElementById('btnTriggerSyncNow');
 const btnAddManualPeer = document.getElementById('btnAddManualPeer');
 const txtManualPeerIp = document.getElementById('txtManualPeerIp');
 const btnSyncLANHeader = document.getElementById('btnSyncLANHeader');
 const lblSyncLocalHostname = document.getElementById('lblSyncLocalHostname');
+const lblSyncPublicIp = document.getElementById('lblSyncPublicIp');
 const lblSyncLocalIp = document.getElementById('lblSyncLocalIp');
+const badgeLocalSyncStatus = document.getElementById('badgeLocalSyncStatus');
+const selSyncNodeRole = document.getElementById('selSyncNodeRole');
+const badgeMasterTargetHost = document.getElementById('badgeMasterTargetHost');
 const lblPeersConnectedCount = document.getElementById('lblPeersConnectedCount');
 const tblSyncPeersBody = document.getElementById('tblSyncPeersBody');
 
@@ -1913,7 +1991,31 @@ async function loadSyncInfo() {
 function renderSyncUI(info) {
   if (!info) return;
   if (lblSyncLocalHostname) lblSyncLocalHostname.textContent = info.hostname || '-';
-  if (lblSyncLocalIp) lblSyncLocalIp.textContent = `${info.localIP}:${info.port}`;
+  if (lblSyncPublicIp) lblSyncPublicIp.textContent = info.publicIp || info.masterIp || '-';
+  if (lblSyncLocalIp) lblSyncLocalIp.textContent = `${info.localIp || info.localIP || '127.0.0.1'}:${info.port || 3000}`;
+
+  const isMaster = !!info.isMasterHub;
+  if (badgeLocalSyncStatus) {
+    if (isMaster) {
+      badgeLocalSyncStatus.className = 'badge bg-success-subtle text-success border border-success-subtle px-2 py-1 mt-1 d-inline-block';
+      badgeLocalSyncStatus.innerHTML = '👑 TRẠM TRUNG CHUYỂN CHÍNH (Máy Chính)';
+    } else {
+      badgeLocalSyncStatus.className = 'badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 mt-1 d-inline-block';
+      badgeLocalSyncStatus.innerHTML = '💻 MÁY TRẠM CON (Gửi về Máy Chính)';
+    }
+  }
+
+  if (selSyncNodeRole) {
+    selSyncNodeRole.value = info.role || (isMaster ? 'MASTER' : 'CLIENT');
+  }
+
+  if (badgeMasterTargetHost) {
+    badgeMasterTargetHost.textContent = `Trạm Chính: ${info.masterHostname || 'LAPTOP-0SNHPCGD'}`;
+  }
+
+  if (txtManualPeerIp && document.activeElement !== txtManualPeerIp) {
+    txtManualPeerIp.value = info.masterIp || '';
+  }
 
   const peers = info.peers || [];
   if (lblPeersConnectedCount) lblPeersConnectedCount.textContent = `${peers.length} máy`;
@@ -1923,7 +2025,9 @@ function renderSyncUI(info) {
     tblSyncPeersBody.innerHTML = `
       <tr>
         <td colspan="5" class="text-center py-4 text-muted small">
-          Chưa phát hiện máy nào khác trong mạng. Hãy mở tool trên máy khác cùng mạng Wi-Fi/LAN (hệ thống sẽ tự nhận diện qua UDP broadcast) hoặc nhập IP thủ công bên trên.
+          ${isMaster
+            ? 'Đang đóng vai trò <strong>Trạm Trung Chuyển Chính</strong>. Khi các máy khác (cùng hoặc khác Wi-Fi) bấm <strong>"⚡ Đồng Bộ Ngay"</strong>, máy đó sẽ xuất hiện tại đây.'
+            : `Máy này đã liên kết sẵn với Trạm Chính <strong>${escapeHtml(info.masterHostname || 'LAPTOP-0SNHPCGD')}</strong> (IP: <code>${escapeHtml(info.masterIp || '')}</code>). Hãy làm việc bình thường và bấm <strong>"⚡ Đồng Bộ Ngay"</strong> khi cần gộp dữ liệu với Máy Chính.`}
         </td>
       </tr>
     `;
@@ -1932,25 +2036,28 @@ function renderSyncUI(info) {
 
   tblSyncPeersBody.innerHTML = peers
     .map((p) => {
-      const timeAgoSec = Math.round((Date.now() - (p.lastSeen || Date.now())) / 1000);
-      const timeStr = timeAgoSec < 10 ? 'Vừa xong' : `${timeAgoSec}s trước`;
+      const timeAgoSec = Math.max(0, Math.round((Date.now() - (p.lastSeen || Date.now())) / 1000));
+      const timeStr = timeAgoSec < 10 ? 'Vừa xong' : timeAgoSec < 60 ? `${timeAgoSec}s trước` : `${Math.round(timeAgoSec / 60)} phút trước`;
+      const roleBadge = p.isMaster
+        ? '<span class="badge bg-warning-subtle text-dark border border-warning-subtle ms-1">👑 Máy Chính</span>'
+        : '<span class="badge bg-light text-secondary border ms-1">Máy Con</span>';
       return `
         <tr>
           <td class="fw-semibold text-dark">
-            <i class="bi bi-laptop me-1 text-primary"></i> ${escapeHtml(p.hostname || 'Máy trạm')}
+            <i class="bi bi-laptop me-1 text-primary"></i> ${escapeHtml(p.hostname || 'Máy trạm')} ${roleBadge}
           </td>
           <td>
-            <code class="fw-bold text-primary">${escapeHtml(p.ip)}:${escapeHtml(p.port)}</code>
+            <code class="fw-bold text-primary">${escapeHtml(p.ip || '-')}:${escapeHtml(p.port || 3000)}</code>
           </td>
           <td>
             <span class="badge bg-success-subtle text-success border border-success-subtle">
-              🟢 Trực tuyến & Đã gộp dữ liệu
+              🟢 ${escapeHtml(p.transport || 'Đã đồng bộ')}
             </span>
           </td>
           <td class="small text-muted">${timeStr}</td>
           <td class="text-end">
-            <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="syncWithSpecificPeer('${escapeHtml(p.ip)}', ${p.port})">
-              ⚡ Gộp ngay
+            <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="syncWithSpecificPeer()">
+              ⚡ Đồng bộ
             </button>
           </td>
         </tr>
@@ -1959,31 +2066,37 @@ function renderSyncUI(info) {
     .join('');
 }
 
-window.syncWithSpecificPeer = async function (ip, port) {
-  try {
-    const res = await fetch('/api/sync/trigger', { method: 'POST' });
-    const data = await res.json();
-    if (data.ok) {
-      alert(`Đã hoàn tất đồng bộ với các máy!`);
-      const sRes = await fetch('/api/state');
-      const sData = await sRes.json();
-      state.contacts = sData.contacts || [];
-      state.settings = sData.settings || {};
-      renderTable();
-      renderReplies();
-      updateOverviewChart(sData.status?.stats || {});
-      updatePanelBadges();
-      loadSyncInfo();
-    }
-  } catch (err) {
-    alert(`Lỗi đồng bộ: ${err.message}`);
+window.syncWithSpecificPeer = async function () {
+  if (btnTriggerSyncNow) {
+    btnTriggerSyncNow.click();
   }
 };
+
+if (selSyncNodeRole) {
+  selSyncNodeRole.addEventListener('change', async () => {
+    const role = selSyncNodeRole.value;
+    try {
+      const res = await fetch('/api/sync/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role })
+      });
+      const data = await res.json();
+      if (data.ok && data.info) {
+        state.syncInfo = data.info;
+        renderSyncUI(data.info);
+        updatePanelBadges();
+      }
+    } catch (err) {
+      alert(`Lỗi đổi vai trò máy: ${err.message}`);
+    }
+  });
+}
 
 if (btnTriggerSyncNow) {
   btnTriggerSyncNow.addEventListener('click', async () => {
     btnTriggerSyncNow.disabled = true;
-    btnTriggerSyncNow.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Đang đồng bộ...';
+    btnTriggerSyncNow.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Đang gửi & gộp bản đầy đủ...';
     try {
       const res = await fetch('/api/sync/trigger', { method: 'POST' });
       const data = await res.json();
@@ -1996,10 +2109,10 @@ if (btnTriggerSyncNow) {
         renderReplies();
         updateOverviewChart(sData.status?.stats || {});
         updatePanelBadges();
-        loadSyncInfo();
-        alert(`Đã hoàn tất đồng bộ! Hiện đang kết nối với ${data.peersCount || 0} máy.`);
+        await loadSyncInfo();
+        alert(data.message || `Đã hoàn tất đồng bộ! Tổng số dữ liệu sau khi sắp xếp: ${data.totalContacts || state.contacts.length} SĐT.`);
       } else {
-        alert(data.error || 'Lỗi khi đồng bộ.');
+        alert(data.error || data.message || 'Chưa kết nối được với Trạm Trung Chuyển Chính. Hãy đảm bảo Máy Chính đang mở Tool!');
       }
     } catch (err) {
       alert(`Lỗi khi đồng bộ: ${err.message}`);
@@ -2014,34 +2127,29 @@ if (btnAddManualPeer) {
   btnAddManualPeer.addEventListener('click', async () => {
     const ip = (txtManualPeerIp ? txtManualPeerIp.value.trim() : '');
     if (!ip) {
-      alert('Vui lòng nhập địa chỉ IP của máy cần kết nối.');
+      alert('Vui lòng nhập địa chỉ IP của Máy Chính (Trạm Trung Chuyển Chính).');
       return;
     }
     btnAddManualPeer.disabled = true;
     try {
-      const res = await fetch('/api/sync/add-peer', {
+      const res = await fetch('/api/sync/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip, port: 3000 })
+        body: JSON.stringify({ masterIp: ip })
       });
       const data = await res.json();
       if (data.ok) {
-        if (txtManualPeerIp) txtManualPeerIp.value = '';
-        alert(`Đã kết nối thành công tới ${ip}:3000 và gộp dữ liệu!`);
-        const sRes = await fetch('/api/state');
-        const sData = await sRes.json();
-        state.contacts = sData.contacts || [];
-        state.settings = sData.settings || {};
-        renderTable();
-        renderReplies();
-        updateOverviewChart(sData.status?.stats || {});
-        updatePanelBadges();
-        loadSyncInfo();
+        if (data.info) {
+          state.syncInfo = data.info;
+          renderSyncUI(data.info);
+          updatePanelBadges();
+        }
+        alert(`✅ Đã lưu và liên kết địa chỉ IP Trạm Trung Chuyển Chính: ${ip}\n\nBây giờ các máy có thể làm việc độc lập (dù khác mạng Wi-Fi). Khi cần gộp dữ liệu, chỉ cần bấm nút "⚡ Đồng Bộ Ngay"!`);
       } else {
-        alert(data.error || 'Không thể kết nối tới IP này. Vui lòng kiểm tra tường lửa/Firewall và cùng cổng 3000.');
+        alert(data.error || 'Không thể lưu cấu hình IP Máy Chính.');
       }
     } catch (err) {
-      alert(`Lỗi kết nối: ${err.message}`);
+      alert(`Lỗi lưu IP: ${err.message}`);
     } finally {
       btnAddManualPeer.disabled = false;
     }
