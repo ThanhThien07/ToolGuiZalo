@@ -22,7 +22,8 @@ const DEFAULT_STATE = {
       '{Xin chào|Chào|Em chào} {ten},\nMình gửi bạn thông tin: {thong_tin}\nNếu cần hỗ trợ thêm bạn cứ phản hồi lại tin nhắn này nhé!',
     useCustomMessageFirst: true,
     fastPasteMode: true,
-    // Tự động chuyển tài khoản: gửi xong tài khoản này tự động dùng tài khoản kế tiếp
+    // Chế độ điều phối tác vụ (Task Orchestrator): ROUND_ROBIN (Luân phiên) | PARALLEL (Song song đa luồng) | SINGLE (1 tài khoản)
+    sendMode: 'ROUND_ROBIN',
     autoRotateAccounts: true,
     rotateEveryN: 15,
     attachedImages: [],
@@ -70,11 +71,27 @@ class Storage {
         if (mergedSettings.sendMode === 'MULTI_PARALLEL') {
           mergedSettings.sendMode = 'MULTI_BROADCAST';
         }
+        const rawContacts = Array.isArray(parsed.contacts) ? parsed.contacts : [];
+        const contacts = this.deduplicateContacts(rawContacts).map((c) => {
+          if (c.hasReplied || c.replyText) {
+            return {
+              ...c,
+              replyNotified: true,
+              replySeen: c.replySeen !== undefined ? c.replySeen : true,
+              knownReplySnippets: Array.isArray(c.knownReplySnippets)
+                ? c.knownReplySnippets
+                : c.replyText
+                ? [c.replyText]
+                : []
+            };
+          }
+          return c;
+        });
         return {
           settings: mergedSettings,
           activeAccountId: parsed.activeAccountId || accounts[0].id,
           accounts,
-          contacts: Array.isArray(parsed.contacts) ? parsed.contacts : [],
+          contacts,
           phoneCache: parsed.phoneCache || {},
           logs: Array.isArray(parsed.logs) ? parsed.logs.slice(-300) : []
         };
@@ -88,10 +105,15 @@ class Storage {
   save() {
     try {
       this.ensureDir();
+      this.state.lastUpdated = new Date().toISOString();
       fs.writeFileSync(DB_FILE, JSON.stringify(this.state, null, 2), 'utf8');
     } catch (err) {
       console.error('Lỗi lưu database.json:', err.message);
     }
+  }
+
+  getLastUpdated() {
+    return this.state.lastUpdated || new Date(0).toISOString();
   }
 
   addLog(level, message, meta = {}) {
@@ -123,6 +145,7 @@ class Storage {
       next.sendMode = 'MULTI_BROADCAST';
     }
     this.state.settings = next;
+    this.state.settingsUpdatedAt = new Date().toISOString();
     this.save();
     return this.state.settings;
   }
@@ -266,6 +289,132 @@ class Storage {
     return { contacts: this.state.contacts, addedOrResetCount };
   }
 
+  deduplicateContacts(contacts) {
+    if (!Array.isArray(contacts)) return [];
+    const byKey = new Map();
+    for (const c of contacts) {
+      if (!c) continue;
+      const isFromZaloWeb = !c.phone || c.phone === 'Từ Zalo Web';
+      const normName = String(c.name || c.zaloName || '')
+        .toLowerCase()
+        .trim();
+      const key = isFromZaloWeb
+        ? `zaloweb__${normName}__${c.replyByAccountId || c.replyByAccount || ''}`
+        : `phone__${c.phone}`;
+
+      if (!byKey.has(key)) {
+        // Check if same ID already exists
+        let existingKey = null;
+        for (const [k, val] of byKey.entries()) {
+          if (val.id && val.id === c.id) {
+            existingKey = k;
+            break;
+          }
+        }
+        if (existingKey) {
+          const prev = byKey.get(existingKey);
+          const prevTime = prev.updatedAt ? new Date(prev.updatedAt).getTime() : 0;
+          const curTime = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
+          const snippets = Array.from(
+            new Set([
+              ...(prev.knownReplySnippets || []),
+              ...(c.knownReplySnippets || []),
+              prev.replyText,
+              c.replyText
+            ].filter(Boolean))
+          );
+          byKey.set(
+            existingKey,
+            curTime >= prevTime
+              ? { ...prev, ...c, knownReplySnippets: snippets }
+              : { ...c, ...prev, knownReplySnippets: snippets }
+          );
+        } else {
+          const snippets = Array.from(
+            new Set([...(c.knownReplySnippets || []), c.replyText].filter(Boolean))
+          );
+          byKey.set(key, { ...c, knownReplySnippets: snippets });
+        }
+      } else {
+        const prev = byKey.get(key);
+        const prevTime = prev.updatedAt ? new Date(prev.updatedAt).getTime() : 0;
+        const curTime = c.updatedAt ? new Date(c.updatedAt).getTime() : 0;
+        const snippets = Array.from(
+          new Set([
+            ...(prev.knownReplySnippets || []),
+            ...(c.knownReplySnippets || []),
+            prev.replyText,
+            c.replyText
+          ].filter(Boolean))
+        );
+        byKey.set(
+          key,
+          curTime >= prevTime
+            ? { ...prev, ...c, id: prev.id, knownReplySnippets: snippets }
+            : { ...c, ...prev, id: prev.id, knownReplySnippets: snippets }
+        );
+      }
+    }
+    return Array.from(byKey.values());
+  }
+
+  addContact(contactData) {
+    const isFromZaloWeb = !contactData.phone || contactData.phone === 'Từ Zalo Web';
+    const normName = String(contactData.name || contactData.zaloName || '')
+      .toLowerCase()
+      .trim();
+
+    const existingIdx = this.state.contacts.findIndex((c) => {
+      if (contactData.id && c.id === contactData.id) return true;
+      if (!isFromZaloWeb && c.phone === contactData.phone) return true;
+      if (isFromZaloWeb && (!c.phone || c.phone === 'Từ Zalo Web')) {
+        const cName = String(c.name || c.zaloName || '')
+          .toLowerCase()
+          .trim();
+        return (
+          cName === normName &&
+          (c.replyByAccountId || '') === (contactData.replyByAccountId || '')
+        );
+      }
+      return false;
+    });
+
+    if (existingIdx !== -1) {
+      return this.updateContact(this.state.contacts[existingIdx].id, contactData);
+    }
+
+    const contact = {
+      id: contactData.id || `ct_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name: contactData.name || '',
+      phone: contactData.phone || '',
+      rawPhone: contactData.rawPhone || contactData.phone || '',
+      info: contactData.info || '',
+      customMessage: contactData.customMessage || '',
+      note: contactData.note || '',
+      status: contactData.status || 'PENDING',
+      zaloName: contactData.zaloName || '',
+      sentMessage: contactData.sentMessage || '',
+      results: contactData.results || {},
+      hasReplied: Boolean(contactData.hasReplied),
+      replyText: contactData.replyText || '',
+      replyAt: contactData.replyAt || new Date().toISOString(),
+      replyByAccount: contactData.replyByAccount || '',
+      replyByAccountId: contactData.replyByAccountId || '',
+      replyNotified: Boolean(contactData.replyNotified),
+      replySeen: Boolean(contactData.replySeen),
+      knownReplySnippets: Array.isArray(contactData.knownReplySnippets)
+        ? contactData.knownReplySnippets
+        : contactData.replyText
+        ? [contactData.replyText]
+        : [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    this.state.contacts.push(contact);
+    this.save();
+    return contact;
+  }
+
   updateContact(id, patch) {
     const idx = this.state.contacts.findIndex((c) => c.id === id);
     if (idx === -1) return null;
@@ -278,6 +427,7 @@ class Storage {
 
     if (
       updated.phone &&
+      updated.phone !== 'Từ Zalo Web' &&
       !String(updated.reason || '').includes('[Chạy thử]') &&
       ['THANH_CONG', 'CHAN_NGUOI_LA', 'KHONG_DANG_KY'].includes(updated.status)
     ) {
@@ -291,6 +441,111 @@ class Storage {
 
     this.save();
     return updated;
+  }
+
+  /**
+   * Hợp nhất dữ liệu thông minh giữa các máy trong mạng LAN (Multi-Node LWW Merge)
+   * Luôn lấy bản cập nhật mới nhất theo thời gian (Last-Write-Wins), không bị ghi đè mất dữ liệu.
+   */
+  mergeRemoteData(remoteState) {
+    if (!remoteState) return { changed: false, updatedContactsCount: 0, newContactsCount: 0 };
+    let changed = false;
+    let updatedContactsCount = 0;
+    let newContactsCount = 0;
+
+    // 1. Đồng bộ Cấu hình (Settings) theo thời điểm mới nhất
+    const remoteSettingsTime = remoteState.settingsUpdatedAt ? new Date(remoteState.settingsUpdatedAt).getTime() : 0;
+    const localSettingsTime = this.state.settingsUpdatedAt ? new Date(this.state.settingsUpdatedAt).getTime() : 0;
+    if (remoteSettingsTime > localSettingsTime && remoteState.settings) {
+      this.state.settings = { ...this.state.settings, ...remoteState.settings };
+      this.state.settingsUpdatedAt = remoteState.settingsUpdatedAt;
+      changed = true;
+    }
+
+    // 2. Đồng bộ Danh sách người nhận (Contacts)
+    if (Array.isArray(remoteState.contacts) && remoteState.contacts.length > 0) {
+      for (const remC of remoteState.contacts) {
+        if (!remC.phone && !remC.id) continue;
+        const normPhone = remC.phone || remC.rawPhone;
+        const isRealPhone = normPhone && normPhone !== 'Từ Zalo Web';
+        const remNormName = String(remC.name || remC.zaloName || '')
+          .toLowerCase()
+          .trim();
+
+        const localIdx = this.state.contacts.findIndex((c) => {
+          if (remC.id && c.id === remC.id) return true;
+          if (isRealPhone && c.phone === normPhone) return true;
+          if (!isRealPhone && (!c.phone || c.phone === 'Từ Zalo Web')) {
+            const locNormName = String(c.name || c.zaloName || '')
+              .toLowerCase()
+              .trim();
+            return (
+              locNormName === remNormName &&
+              (c.replyByAccountId || '') === (remC.replyByAccountId || '')
+            );
+          }
+          return false;
+        });
+
+        if (localIdx !== -1) {
+          const locC = this.state.contacts[localIdx];
+          const remTime = remC.updatedAt ? new Date(remC.updatedAt).getTime() : 0;
+          const locTime = locC.updatedAt ? new Date(locC.updatedAt).getTime() : 0;
+
+          // Nếu bản từ máy kia mới hơn bản trên máy này
+          if (remTime > locTime) {
+            const mergedResults = { ...(locC.results || {}), ...(remC.results || {}) };
+            this.state.contacts[localIdx] = {
+              ...locC,
+              ...remC,
+              results: mergedResults,
+              updatedAt: remC.updatedAt || new Date().toISOString()
+            };
+            updatedContactsCount++;
+            changed = true;
+          } else {
+            // Ngay cả khi bản local mới hơn, nếu máy kia có kết quả gửi của nick mới, gộp vào!
+            if (remC.results && Object.keys(remC.results).length > 0) {
+              const prevResultsKeys = Object.keys(locC.results || {});
+              const newResults = { ...(remC.results || {}), ...(locC.results || {}) };
+              if (Object.keys(newResults).length > prevResultsKeys.length) {
+                locC.results = newResults;
+                changed = true;
+              }
+            }
+            // Nếu máy kia có phản hồi mới từ khách hàng mà máy này chưa có
+            if (remC.hasReplied && !locC.hasReplied) {
+              locC.hasReplied = true;
+              locC.replyText = remC.replyText;
+              locC.replyAt = remC.replyAt;
+              locC.replyByAccount = remC.replyByAccount;
+              locC.replyByAccountId = remC.replyByAccountId;
+              changed = true;
+            }
+          }
+        } else {
+          // Contact mới hoàn toàn từ máy khác -> thêm vào máy này!
+          this.state.contacts.push({
+            ...remC,
+            results: remC.results || {}
+          });
+          newContactsCount++;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      this.state.lastUpdated = new Date().toISOString();
+      this.save();
+    }
+
+    return {
+      changed,
+      updatedContactsCount,
+      newContactsCount,
+      totalContacts: this.state.contacts.length
+    };
   }
 
   clearPhoneCache() {

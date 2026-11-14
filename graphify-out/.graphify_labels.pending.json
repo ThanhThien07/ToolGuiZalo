@@ -8,5 +8,7 @@
   "6": "ToolGuiZalo - Web App Tự Động Gửi Tin Nhắn Zalo & Xuất Báo Cáo Phân Loại",
   "7": "openQrModal",
   "8": "applySettingsToForm",
-  "9": "collectSettingsFromForm"
+  "9": "collectSettingsFromForm",
+  "10": "TaskEngine",
+  "11": "P2PSyncEngine"
 }

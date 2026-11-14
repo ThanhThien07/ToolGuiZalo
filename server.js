@@ -9,6 +9,7 @@ const { normalizePhone } = require('./src/phoneUtils');
 const { renderMessage } = require('./src/templateEngine');
 const storage = require('./src/storage');
 const zaloBot = require('./src/zaloBot');
+const p2pSync = require('./src/p2pSync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,9 +45,38 @@ function broadcastSSE(event, payload) {
 }
 
 zaloBot.on('status', (status) => broadcastSSE('status', status));
-zaloBot.on('contact_updated', (contact) => broadcastSSE('contact_updated', contact));
+zaloBot.on('contact_updated', (contact) => {
+  broadcastSSE('contact_updated', contact);
+  p2pSync.notifyAllPeers().catch(() => {});
+});
 zaloBot.on('contacts_replaced', (contacts) => broadcastSSE('contacts_replaced', contacts));
 zaloBot.on('log', (entry) => broadcastSSE('log', entry));
+zaloBot.on('reply_received', (data) => {
+  broadcastSSE('reply_received', data);
+  p2pSync.notifyAllPeers().catch(() => {});
+});
+zaloBot.on('replies_updated', (replies) => broadcastSSE('replies_updated', replies));
+
+// Lắng nghe sự kiện đồng bộ từ máy khác trong mạng LAN
+p2pSync.on('sync_updated', (info) => {
+  broadcastSSE('contacts_replaced', storage.getContacts());
+  broadcastSSE('status', zaloBot.getStatus());
+  broadcastSSE('sync_status', p2pSync.getInfo());
+  zaloBot.log(
+    'info',
+    `🌐 [Đồng bộ P2P LAN] Đã tự động cập nhật từ máy "${info.source}": +${info.updatedContactsCount} cập nhật, +${info.newContactsCount} số mới.`
+  );
+});
+
+p2pSync.on('peer_discovered', (peer) => {
+  broadcastSSE('peer_connected', peer);
+  broadcastSSE('sync_status', p2pSync.getInfo());
+  zaloBot.log('info', `🔗 [P2P LAN Sync] Đã kết nối với máy mới: "${peer.hostname}" (${peer.ip}:${peer.port})`);
+});
+
+p2pSync.on('peer_lost', (peer) => {
+  broadcastSSE('sync_status', p2pSync.getInfo());
+});
 
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -78,6 +108,7 @@ app.get('/api/state', (req, res) => {
 app.post('/api/settings', (req, res) => {
   const updated = storage.updateSettings(req.body || {});
   broadcastSSE('status', zaloBot.getStatus());
+  p2pSync.notifyAllPeers().catch(() => {});
   res.json({ ok: true, settings: updated });
 });
 
@@ -281,6 +312,7 @@ app.post('/api/contacts/import-text', (req, res) => {
     'info',
     `Đã nạp/đặt lại ${addedOrResetCount} SĐT về trạng thái Chờ xử lý (Tổng danh sách: ${contacts.length} dòng).`
   );
+  p2pSync.notifyAllPeers().catch(() => {});
   res.json({ ok: true, added: addedOrResetCount, contacts, stats: storage.getStats() });
 });
 
@@ -362,6 +394,7 @@ app.post('/api/contacts/import-file', upload.single('file'), (req, res) => {
       'info',
       `Đã nhập file "${req.file.originalname}" (${addedOrResetCount} SĐT sẵn sàng gửi, tổng danh sách: ${contacts.length}).`
     );
+    p2pSync.notifyAllPeers().catch(() => {});
 
     res.json({
       ok: true,
@@ -520,6 +553,7 @@ app.post('/api/contacts/reset', (req, res) => {
   const { filterStatus = 'ALL' } = req.body || {};
   const contacts = storage.resetContactsStatus(filterStatus);
   zaloBot.log('info', `Đã đặt lại trạng thái danh sách (${filterStatus}) về Chờ xử lý.`);
+  p2pSync.notifyAllPeers().catch(() => {});
   res.json({ ok: true, contacts, stats: storage.getStats() });
 });
 
@@ -529,6 +563,7 @@ app.delete('/api/contacts', (req, res) => {
   }
   storage.clearContacts();
   zaloBot.log('warning', 'Đã xóa toàn bộ danh sách số điện thoại.');
+  p2pSync.notifyAllPeers().catch(() => {});
   res.json({ ok: true, contacts: [], stats: storage.getStats() });
 });
 
@@ -537,6 +572,7 @@ app.delete('/api/contacts/:id', (req, res) => {
   const filtered = storage.getContacts().filter((c) => c.id !== id);
   storage.setContacts(filtered);
   broadcastSSE('status', zaloBot.getStatus());
+  p2pSync.notifyAllPeers().catch(() => {});
   res.json({ ok: true, contacts: filtered, stats: storage.getStats() });
 });
 
@@ -617,6 +653,25 @@ app.post('/api/campaign/pause', (req, res) => {
   res.json({ ok: true, status });
 });
 
+// ===================== API Task Orchestrator & Worker Pool =====================
+
+app.get('/api/orchestrator/status', (req, res) => {
+  const taskEngine = require('./src/taskEngine');
+  res.json({ ok: true, ...taskEngine.getSummary() });
+});
+
+app.post('/api/orchestrator/mode', (req, res) => {
+  const taskEngine = require('./src/taskEngine');
+  const { mode } = req.body || {};
+  if (['ROUND_ROBIN', 'PARALLEL', 'SINGLE'].includes(mode)) {
+    storage.updateSettings({ sendMode: mode });
+    taskEngine.mode = mode;
+    res.json({ ok: true, mode });
+  } else {
+    res.status(400).json({ error: 'Chế độ điều phối không hợp lệ' });
+  }
+});
+
 // ===================== API Quản lý khách hàng phản hồi =====================
 
 app.get('/api/replies', (req, res) => {
@@ -643,10 +698,20 @@ app.post('/api/contacts/:id/reply', (req, res) => {
   }
 });
 
+app.post('/api/replies/seen', (req, res) => {
+  try {
+    const { contactId } = req.body || {};
+    zaloBot.markRepliesSeen(contactId || null);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/browser/open-chat', async (req, res) => {
   try {
-    const { accountId, phone } = req.body || {};
-    const status = await zaloBot.openChat(accountId, phone);
+    const { accountId, phone, contactName } = req.body || {};
+    const status = await zaloBot.openChat(accountId, phone, contactName);
     res.json({ ok: true, status });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -705,8 +770,80 @@ app.post('/api/replies/reset', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`=====================================================`);
-  console.log(`🚀 ToolGuiZalo Web App đang chạy tại: http://localhost:${PORT}`);
-  console.log(`=====================================================`);
+// ===================== API Đồng bộ hóa đa máy (P2P LAN Sync) =====================
+
+app.get('/api/sync/info', (req, res) => {
+  res.json({ ok: true, ...p2pSync.getInfo() });
 });
+
+app.get('/api/sync/state', (req, res) => {
+  res.json(p2pSync.getLocalExportState());
+});
+
+app.post('/api/sync/merge', (req, res) => {
+  try {
+    const mergeRes = storage.mergeRemoteData(req.body);
+    if (mergeRes.changed) {
+      broadcastSSE('contacts_replaced', storage.getContacts());
+      broadcastSSE('status', zaloBot.getStatus());
+      broadcastSSE('sync_status', p2pSync.getInfo());
+    }
+    res.json({ ok: true, ...mergeRes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/trigger', async (req, res) => {
+  try {
+    const result = await p2pSync.syncAll();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync/add-peer', (req, res) => {
+  try {
+    const { ip, port } = req.body || {};
+    if (!ip) return res.status(400).json({ error: 'Vui lòng nhập địa chỉ IP máy cần đồng bộ' });
+    const ok = p2pSync.addManualPeer(ip, port || 3000);
+    res.json({ ok, peers: p2pSync.getInfo().peers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function startServer(port = 3000) {
+  const server = app.listen(port, '0.0.0.0', () => {
+    p2pSync.port = port;
+    p2pSync.start();
+
+    console.log(`\n================================================================`);
+    console.log(`🚀 ToolGuiZalo Web App đang chạy thành công tại:`);
+    console.log(`   👉 http://localhost:${port}`);
+    console.log(`   👉 http://127.0.0.1:${port}`);
+    console.log(`================================================================`);
+    console.log(`⚠️  LƯU Ý: Vui lòng GIỮ NGUYÊN cửa sổ này trong suốt lúc dùng tool.`);
+    console.log(`   Nếu đóng cửa sổ này, trang web sẽ bị báo lỗi không kết nối.`);
+    console.log(`================================================================\n`);
+
+    // Tự động mở trình duyệt sau khi server đã lắng nghe cổng thành công 100%
+    if (!process.env.NO_AUTO_OPEN) {
+      const url = `http://localhost:${port}`;
+      const openCmd = process.platform === 'win32' ? `start "" "${url}"` : `open "${url}"`;
+      require('child_process').exec(openCmd, () => {});
+    }
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[CẢNH BÁO] Cổng ${port} đang bận bởi ứng dụng khác. Đang thử cổng ${port + 1}...`);
+      startServer(port + 1);
+    } else {
+      console.error(`[LỖI SERVER]:`, err.message);
+    }
+  });
+}
+
+startServer(Number(PORT));

@@ -4,6 +4,7 @@ const EventEmitter = require('events');
 const { chromium } = require('playwright');
 const storage = require('./storage');
 const { renderMessage } = require('./templateEngine');
+const taskEngine = require('./taskEngine');
 
 const BASE_USER_DATA_DIR = path.join(__dirname, '..', 'user_data');
 const VIEWPORT_SIZE = { width: 1280, height: 800 };
@@ -21,6 +22,17 @@ const STATUS_LABELS = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function stripDiacritics(str) {
+  if (!str) return '';
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
 class ZaloBot extends EventEmitter {
   constructor() {
     super();
@@ -36,8 +48,12 @@ class ZaloBot extends EventEmitter {
     this.campaign = null; // Thông tin lần chạy hiện tại (xem startCampaign)
     this.scheduleCountdownSec = 0;
     this._statusTimer = null;
+    this._replyWatcher = null;
+    this._isCheckingReplies = false;
 
     this.startScheduleWatcher();
+    this.startReplyWatcher(4000);
+    taskEngine.on('change', () => this.scheduleStatusBroadcast());
     // Tự động khôi phục chạy ngầm các tài khoản đã có thư mục lưu phiên đăng nhập
     setTimeout(() => {
       this.autoRestoreSavedSessions().catch(() => {});
@@ -103,6 +119,7 @@ class ZaloBot extends EventEmitter {
       viewingAccountId: this.viewingAccountId,
       readyAccountsCount: accounts.filter((a) => a.status === 'READY').length,
       activeWorkers: runningWorkers.length,
+      orchestrator: taskEngine.getSummary(),
       campaign: this.campaign
         ? {
             accountMode: this.campaign.accountMode,
@@ -258,7 +275,17 @@ class ZaloBot extends EventEmitter {
       viewport: VIEWPORT_SIZE,
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      args: ['--disable-blink-features=AutomationControlled', '--no-default-browser-check', '--window-size=1280,840']
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-default-browser-check',
+        '--window-size=1280,840',
+        '--disable-dev-shm-usage',
+        '--disable-renderer-backgrounding',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-features=CalculateNativeWinOcclusion',
+        '--disable-ipc-flooding-protection'
+      ]
     };
 
     let context = null;
@@ -421,10 +448,21 @@ class ZaloBot extends EventEmitter {
     const id = accountId || this.viewingAccountId || storage.getActiveAccount().id;
     const sess = this.sessions.get(id);
     if (!this.isSessionAlive(sess)) return null;
+
+    // Cache micro-frame (120ms) để khi poll nhanh không bị nghẽn CPU
+    const now = Date.now();
+    if (this._lastShot && this._lastShot.accountId === id && now - this._lastShot.time < 120) {
+      return this._lastShot.data;
+    }
+
     try {
-      await this.checkAccountLoginStatus(id);
-      const buffer = await sess.page.screenshot({ type: 'jpeg', quality: 75 });
-      return {
+      // Chụp siêu tốc với quality 55 và timeout ngắn 2000ms
+      const buffer = await sess.page.screenshot({
+        type: 'jpeg',
+        quality: 55,
+        timeout: 2000
+      });
+      const data = {
         accountId: id,
         imageBase64: `data:image/jpeg;base64,${buffer.toString('base64')}`,
         url: sess.page.url(),
@@ -432,6 +470,8 @@ class ZaloBot extends EventEmitter {
         width: VIEWPORT_SIZE.width,
         height: VIEWPORT_SIZE.height
       };
+      this._lastShot = { accountId: id, time: now, data };
+      return data;
     } catch {
       return null;
     }
@@ -444,8 +484,7 @@ class ZaloBot extends EventEmitter {
     const x = Math.round(Math.max(0, Math.min(1, Number(xRatio))) * VIEWPORT_SIZE.width);
     const y = Math.round(Math.max(0, Math.min(1, Number(yRatio))) * VIEWPORT_SIZE.height);
     await sess.page.mouse.click(x, y);
-    await sess.page.waitForTimeout(350);
-    await this.checkAccountLoginStatus(id);
+    this._lastShot = null; // Xóa cache frame cũ để frame mới nhất cập nhật ngay
     return true;
   }
 
@@ -603,6 +642,16 @@ class ZaloBot extends EventEmitter {
 
     const updated = storage.updateContact(contactId, { results, ...patch });
     this.emitContact(updated);
+
+    // Đồng bộ vào Task Engine
+    const task = taskEngine.queue.find((t) => t.contactId === contactId);
+    if (task) {
+      if (result.status === 'THANH_CONG') {
+        taskEngine.completeTask(task.id, result);
+      } else {
+        taskEngine.failTask(task.id, result.reason || result.status, false);
+      }
+    }
     return updated;
   }
 
@@ -611,6 +660,7 @@ class ZaloBot extends EventEmitter {
    */
   releaseContact(campaign, worker, contactId, reason) {
     campaign.inFlight.delete(`${contactId}|${worker.accountId}`);
+    taskEngine.reclaimWorkerTasks(worker.accountId, reason);
     const contact = storage.getContact(contactId);
     if (!contact) return;
     const updated = storage.updateContact(contactId, {
@@ -635,87 +685,311 @@ class ZaloBot extends EventEmitter {
 
   // ===================== Quản lý phản hồi từ khách hàng =====================
 
+  startReplyWatcher(intervalMs = 4000) {
+    if (this._replyWatcher) return;
+    this._replyWatcher = setInterval(async () => {
+      if (this._isCheckingReplies) return;
+      // Nếu đang trong chiến dịch gửi thì chỉ quét nếu có tài khoản rảnh
+      try {
+        await this.checkReplies();
+      } catch (err) {
+        // ngầm không log ồn ào
+      }
+    }, intervalMs);
+  }
+
+  stopReplyWatcher() {
+    if (this._replyWatcher) {
+      clearInterval(this._replyWatcher);
+      this._replyWatcher = null;
+    }
+  }
+
   /**
    * Quét kiểm tra phản hồi từ khách trên các tài khoản Zalo Web
    */
   async checkReplies(targetAccountId = null) {
-    const allAccounts = storage.getAccounts();
-    const accountsToCheck = targetAccountId
-      ? allAccounts.filter((a) => a.id === targetAccountId)
-      : allAccounts.filter((a) => this.sessions.has(a.id) && this.sessions.get(a.id).isReady);
+    if (this._isCheckingReplies) return { ok: true, foundCount: 0, replies: [] };
+    this._isCheckingReplies = true;
 
-    let foundRepliesCount = 0;
-    const contacts = storage.getContacts();
+    try {
+      const allAccounts = storage.getAccounts();
+      const accountsToCheck = allAccounts.filter((a) => {
+        if (targetAccountId && a.id !== targetAccountId) return false;
+        const sess = this.sessions.get(a.id);
+        return this.isSessionAlive(sess) && sess.browserState === 'READY';
+      });
 
-    for (const acc of accountsToCheck) {
-      const sess = this.sessions.get(acc.id);
-      if (!sess || !sess.page || sess.page.isClosed()) continue;
+      let foundRepliesCount = 0;
+      const contacts = storage.getContacts();
+      const newReplies = [];
 
-      try {
-        const chats = await sess.page.evaluate(() => {
-          const items = Array.from(document.querySelectorAll('.conv-item.conv-rel, [data-id^="conv-item-"]'));
-          return items.map((el) => {
-            const titleEl = el.querySelector('.conv-item-title__name, .conv-item-title, [class*="title__name"]');
-            const bodyEl = el.querySelector('.conv-item-body__main, .conv-message, [class*="body__main"]');
-            const badgeEl = el.querySelector('.unread-badge, .v2-badge, [class*="badge"], [class*="unread"]');
-            const name = titleEl ? titleEl.innerText.replace(/\u00A0/g, ' ').trim() : '';
-            const snippet = bodyEl ? bodyEl.innerText.replace(/\u00A0/g, ' ').trim() : '';
-            const hasUnread = !!badgeEl && badgeEl.offsetParent !== null;
-            const isFromMe = /^bạn\s*:/i.test(snippet) || /^you\s*:/i.test(snippet);
-            return { name, snippet, isFromMe, hasUnread };
-          });
-        });
+      const IGNORED_NAMES = [
+        'my documents',
+        'zalo',
+        'thoi tiet',
+        'bao moi',
+        'zalo pay',
+        'zalopay',
+        'cloud cua toi',
+        'tin nhan tu nguoi la',
+        'zstyle'
+      ];
 
-        for (const chat of chats) {
-          if (!chat.name || !chat.snippet) continue;
-          if (chat.snippet.toLowerCase() === 'chưa có tin nhắn') continue;
-          // NẾU LÀ TIN NHẮN TỪ MÌNH GỬI ĐI THÌ TUYỆT ĐỐI KHÔNG PHẢI PHẢN HỒI!
-          if (chat.isFromMe) continue;
+      for (const acc of accountsToCheck) {
+        const sess = this.sessions.get(acc.id);
+        if (!this.isSessionAlive(sess)) continue;
 
-          // Tìm contact tương ứng trong danh sách
-          const normChatName = chat.name.toLowerCase();
-          const matched = contacts.find((c) => {
-            const normZaloName = (c.zaloName || '').toLowerCase().trim();
-            const normContactName = (c.name || '').toLowerCase().trim();
-            return (
-              (normZaloName && normZaloName === normChatName) ||
-              (normContactName && normContactName === normChatName)
+        try {
+          const chats = await sess.page.evaluate(() => {
+            const items = Array.from(
+              document.querySelectorAll('.conv-item.conv-rel, [data-id^="conv-item-"]')
             );
+            return items.map((el) => {
+              const titleEl = el.querySelector(
+                '.conv-item-title__name, .conv-item-title, [class*="title__name"]'
+              );
+              const bodyEl = el.querySelector(
+                '.conv-item-body__main, .conv-message, [class*="body__main"]'
+              );
+              const badgeEl = el.querySelector(
+                '.unread-badge, .v2-badge, [class*="badge"], [class*="unread"]'
+              );
+              const rawName = titleEl ? titleEl.innerText : '';
+              const rawBody = bodyEl ? bodyEl.innerText : '';
+              const name = rawName.replace(/\u00A0/g, ' ').trim();
+              const snippet = rawBody.replace(/\u00A0/g, ' ').trim();
+              const hasUnread = !!badgeEl && badgeEl.offsetParent !== null;
+              const isFromMe = /^bạn\s*:/i.test(snippet) || /^you\s*:/i.test(snippet);
+              return { name, snippet, isFromMe, hasUnread };
+            });
           });
 
-          if (matched) {
-            // Chỉ kiểm tra contact đã gửi tin thành công
-            if (matched.status !== 'THANH_CONG') {
-              continue;
-            }
+          // Đọc luôn cuộc hội thoại đang mở trực tiếp (nếu có tin nhắn từ khách hàng)
+          const openChatData = await sess.page
+            .evaluate(() => {
+              const headerEl =
+                document.querySelector('header .header-title') ||
+                document.querySelector('[data-id="div_Main_Header"] .truncate') ||
+                document.querySelector('.thread-chat-title');
+              if (!headerEl) return null;
+              const openName = (headerEl.innerText || '').replace(/\u00A0/g, ' ').trim();
+              if (!openName) return null;
 
-            // Kiểm tra xem tin nhắn có phải nội dung ta đã gửi đi không
-            const sentSnippet = (matched.sentMessage || '').replace(/\s+/g, ' ').trim().slice(0, 30);
-            if (sentSnippet && chat.snippet.includes(sentSnippet)) {
-              continue;
-            }
+              const msgs = Array.from(
+                document.querySelectorAll(
+                  '.chat-message, .msg-view, [data-id^="msg-"], .bubble-item'
+                )
+              );
+              if (msgs.length === 0) return null;
 
-            storage.updateContact(matched.id, {
-              hasReplied: true,
-              replyText: chat.snippet,
-              replyAt: new Date().toISOString(),
-              replyByAccount: acc.name,
-              replyByAccountId: acc.id
-            });
-            foundRepliesCount++;
+              // Lọc các tin nhắn gửi từ phía đối phương (không phải từ mình)
+              const customerMsgs = msgs.filter((el) => {
+                const isMe =
+                  el.classList.contains('me') ||
+                  el.querySelector('.me') !== null ||
+                  el.getAttribute('data-is-me') === 'true';
+                return !isMe;
+              });
+
+              if (customerMsgs.length === 0) return null;
+              const lastCustMsg = customerMsgs[customerMsgs.length - 1];
+              const text = (lastCustMsg.innerText || '').replace(/\u00A0/g, ' ').trim();
+              return { name: openName, snippet: text, isFromMe: false, hasUnread: false };
+            })
+            .catch(() => null);
+
+          // Gom nhóm theo tên khách hàng trên từng tài khoản để tránh trùng lặp giữa sidebar và cửa sổ chat đang mở
+          const chatMap = new Map();
+          for (const chat of chats) {
+            if (!chat.name || !chat.snippet) continue;
+            if (chat.isFromMe) continue;
+            const normName = chat.name.toLowerCase().trim();
+            const cleanName = stripDiacritics(normName);
+            if (!cleanName) continue;
+            if (!chatMap.has(cleanName)) {
+              chatMap.set(cleanName, {
+                name: chat.name,
+                normChatName: normName,
+                cleanChatName: cleanName,
+                primarySnippet: chat.snippet,
+                allSnippets: [chat.snippet]
+              });
+            } else {
+              chatMap.get(cleanName).allSnippets.push(chat.snippet);
+            }
           }
-        }
-      } catch (err) {
-        this.log('warning', `Kiểm tra phản hồi trên "${acc.name}" gặp lỗi: ${err.message}`);
-      }
-    }
 
-    const replies = storage.getContacts().filter((c) => c.hasReplied && c.replyText);
-    return {
-      ok: true,
-      foundCount: foundRepliesCount,
-      replies
-    };
+          if (openChatData && openChatData.name && openChatData.snippet && !openChatData.isFromMe) {
+            const normOpen = openChatData.name.toLowerCase().trim();
+            const cleanOpen = stripDiacritics(normOpen);
+            if (cleanOpen) {
+              if (chatMap.has(cleanOpen)) {
+                chatMap.get(cleanOpen).allSnippets.push(openChatData.snippet);
+              } else {
+                chatMap.set(cleanOpen, {
+                  name: openChatData.name,
+                  normChatName: normOpen,
+                  cleanChatName: cleanOpen,
+                  primarySnippet: openChatData.snippet,
+                  allSnippets: [openChatData.snippet]
+                });
+              }
+            }
+          }
+
+          for (const chatEntry of chatMap.values()) {
+            const { name: chatName, normChatName, cleanChatName, primarySnippet } = chatEntry;
+            const allSnippets = Array.from(new Set(chatEntry.allSnippets.filter(Boolean)));
+            if (!chatName || !primarySnippet) continue;
+            if (primarySnippet.toLowerCase() === 'chưa có tin nhắn') continue;
+
+            if (
+              IGNORED_NAMES.some((ig) => cleanChatName.includes(ig)) ||
+              primarySnippet.includes('Đăng nhập Zalo trên máy tính') ||
+              primarySnippet.includes('[Không có tin nhắn gần đây]') ||
+              primarySnippet.includes('Chưa có trong danh bạ') ||
+              primarySnippet.toLowerCase() === 'chưa có tin nhắn'
+            ) {
+              continue;
+            }
+
+            // Tìm contact tương ứng trong toàn bộ danh sách (hỗ trợ có dấu và không dấu)
+            const currentAllContacts = storage.getContacts();
+            const matched = currentAllContacts.find((c) => {
+              const normZaloName = (c.zaloName || '').toLowerCase().trim();
+              const normContactName = (c.name || '').toLowerCase().trim();
+              const cleanZaloName = stripDiacritics(normZaloName);
+              const cleanContactName = stripDiacritics(normContactName);
+
+              return (
+                (normZaloName && normZaloName === normChatName) ||
+                (normContactName && normContactName === normChatName) ||
+                (cleanZaloName && cleanZaloName === cleanChatName) ||
+                (cleanContactName && cleanContactName === cleanChatName) ||
+                (c.phone && c.phone !== 'Từ Zalo Web' && normChatName.includes(c.phone))
+              );
+            });
+
+            if (matched) {
+              // Kiểm tra xem tin nhắn có phải nội dung ta đã gửi đi không
+              const sentSnippet = (matched.sentMessage || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 30);
+              if (sentSnippet && primarySnippet.includes(sentSnippet)) {
+                continue;
+              }
+
+              const knownSnippets = Array.isArray(matched.knownReplySnippets)
+                ? matched.knownReplySnippets
+                : matched.replyText
+                ? [matched.replyText]
+                : [];
+              const isSameStartupState =
+                matched.hasReplied &&
+                knownSnippets.length === 1 &&
+                allSnippets.includes(knownSnippets[0]);
+              const isBrandNewSnippet =
+                !matched.hasReplied ||
+                (!isSameStartupState && !knownSnippets.includes(primarySnippet));
+              const mergedSnippets = Array.from(new Set([...knownSnippets, ...allSnippets]));
+
+              if (!isBrandNewSnippet) {
+                if (mergedSnippets.length > knownSnippets.length) {
+                  storage.updateContact(matched.id, { knownReplySnippets: mergedSnippets });
+                }
+                continue;
+              }
+
+              // Chỉ thông báo 1 lần duy nhất; chỉ thông báo lại nếu người dùng đã xem (replySeen = true) và có tin nhắn mới
+              const shouldNotify =
+                !matched.hasReplied || !matched.replyNotified || matched.replySeen === true;
+
+              const updated = storage.updateContact(matched.id, {
+                hasReplied: true,
+                replyText: primarySnippet,
+                replyAt: new Date().toISOString(),
+                replyByAccount: acc.name,
+                replyByAccountId: acc.id,
+                knownReplySnippets: mergedSnippets,
+                replyNotified: true,
+                replySeen: shouldNotify ? false : Boolean(matched.replySeen)
+              });
+              foundRepliesCount++;
+              newReplies.push({
+                contact: updated,
+                replyText: primarySnippet,
+                accountName: acc.name
+              });
+              this.emitContact(updated);
+              if (shouldNotify) {
+                this.emit('reply_received', {
+                  contact: updated,
+                  replyText: primarySnippet,
+                  accountName: acc.name,
+                  replyAt: updated.replyAt
+                });
+                this.log(
+                  'success',
+                  `🎉 Phản hồi mới từ "${chatName}" trên [${acc.name}]: "${primarySnippet}"`
+                );
+              }
+            } else {
+              // Tự động tạo một liên hệ trong danh bạ để khách hàng hiển thị ngay trên bảng
+              const autoCreated = storage.addContact({
+                name: chatName,
+                zaloName: chatName,
+                phone: 'Từ Zalo Web',
+                status: 'THANH_CONG',
+                sentMessage: '(Đã gửi trên Zalo Web)',
+                hasReplied: true,
+                replyText: primarySnippet,
+                replyAt: new Date().toISOString(),
+                replyByAccount: acc.name,
+                replyByAccountId: acc.id,
+                replyNotified: true,
+                replySeen: false,
+                knownReplySnippets: allSnippets,
+                note: 'Khách phản hồi trực tiếp trên Zalo Web'
+              });
+              foundRepliesCount++;
+              newReplies.push({
+                contact: autoCreated,
+                replyText: primarySnippet,
+                accountName: acc.name
+              });
+              this.emitContact(autoCreated);
+              this.emit('reply_received', {
+                contact: autoCreated,
+                replyText: primarySnippet,
+                accountName: acc.name,
+                replyAt: autoCreated.replyAt
+              });
+              this.log(
+                'success',
+                `🎉 Khách hàng "${chatName}" vừa nhắn lại trên [${acc.name}]: "${primarySnippet}"`
+              );
+            }
+          }
+        } catch (err) {
+          // Bỏ qua lỗi tạm thời khi trang đang refresh
+        }
+      }
+
+      if (newReplies.length > 0) {
+        this.emit('replies_updated', storage.getContacts().filter((c) => c.hasReplied));
+      }
+
+      const replies = storage.getContacts().filter((c) => c.hasReplied && c.replyText);
+      return {
+        ok: true,
+        foundCount: foundRepliesCount,
+        replies
+      };
+    } finally {
+      this._isCheckingReplies = false;
+    }
   }
 
   /**
@@ -723,7 +997,15 @@ class ZaloBot extends EventEmitter {
    */
   resetReplies() {
     for (const c of storage.getContacts()) {
+      const prevSnippets = Array.isArray(c.knownReplySnippets)
+        ? c.knownReplySnippets
+        : c.replyText
+        ? [c.replyText]
+        : [];
       c.hasReplied = false;
+      c.replyNotified = false;
+      c.replySeen = true;
+      c.knownReplySnippets = prevSnippets;
       delete c.replyText;
       delete c.replyAt;
       delete c.replyByAccount;
@@ -734,27 +1016,68 @@ class ZaloBot extends EventEmitter {
   }
 
   /**
+   * Đánh dấu đã xem phản hồi (để chỉ thông báo lại khi khách nhắn tin mới sau khi đã xem)
+   */
+  markRepliesSeen(contactId = null) {
+    let changed = false;
+    for (const c of storage.getContacts()) {
+      if (contactId && c.id !== contactId && c.phone !== contactId && c.name !== contactId) {
+        continue;
+      }
+      if (c.hasReplied || c.replyText) {
+        if (!c.replySeen || !c.replyNotified) {
+          c.replySeen = true;
+          c.replyNotified = true;
+          if (!Array.isArray(c.knownReplySnippets)) {
+            c.knownReplySnippets = c.replyText ? [c.replyText] : [];
+          } else if (c.replyText && !c.knownReplySnippets.includes(c.replyText)) {
+            c.knownReplySnippets.push(c.replyText);
+          }
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      storage.save();
+    }
+    return true;
+  }
+
+  /**
    * Đánh dấu hoặc cập nhật phản hồi của 1 liên hệ (hỗ trợ kiểm thử và quản lý thủ công)
    */
   markReply(contactId, options = {}) {
     const contact = storage.getContact(contactId);
     if (!contact) throw new Error('Không tìm thấy liên hệ.');
     const activeAcc = storage.getActiveAccount();
+    const replyText = options.replyText || 'Chào bạn, mình cần hỗ trợ thêm thông tin này nhé!';
     const updated = storage.updateContact(contactId, {
       hasReplied: true,
-      replyText: options.replyText || 'Chào bạn, mình cần hỗ trợ thêm thông tin này nhé!',
+      replyText,
       replyAt: new Date().toISOString(),
       replyByAccount: options.accountName || (activeAcc ? activeAcc.name : 'Tài khoản Zalo #1'),
-      replyByAccountId: options.accountId || (activeAcc ? activeAcc.id : 'acc_default')
+      replyByAccountId: options.accountId || (activeAcc ? activeAcc.id : 'acc_default'),
+      replyNotified: true,
+      replySeen: false,
+      knownReplySnippets: Array.from(
+        new Set([...(contact.knownReplySnippets || []), replyText])
+      )
     });
     this.emitContact(updated);
+    this.emit('reply_received', {
+      contact: updated,
+      replyText: updated.replyText,
+      accountName: updated.replyByAccount,
+      replyAt: updated.replyAt
+    });
     return updated;
   }
 
   /**
    * Mở trực tiếp cuộc trò chuyện của khách hàng trên Zalo Web để người dùng trả lời
    */
-  async openChat(accountId, phone) {
+  async openChat(accountId, phone, contactName = '') {
+    this.markRepliesSeen(phone || contactName);
     const acc = storage.getAccount(accountId) || storage.getActiveAccount();
     if (!acc) throw new Error('Không tìm thấy tài khoản Zalo.');
     await this.ensureAccountReady(acc.id);
@@ -765,12 +1088,15 @@ class ZaloBot extends EventEmitter {
     this.viewingAccountId = acc.id;
     storage.setActiveAccount(acc.id);
 
+    const searchQuery =
+      phone && phone !== 'Từ Zalo Web' ? phone : contactName || phone || '';
+
     const page = sess.page;
     try {
       const searchInput = page.locator('#contact-search-input, [data-id="contact-search-input"], input[placeholder*="Tìm kiếm"]').first();
-      if ((await searchInput.count()) > 0) {
+      if (searchQuery && (await searchInput.count()) > 0) {
         await searchInput.click();
-        await searchInput.fill(phone);
+        await searchInput.fill(searchQuery);
         await page.waitForTimeout(600);
         const firstResult = page.locator('.conv-item, [data-id^="conv-item-"], .search-item').first();
         if ((await firstResult.count()) > 0) {
@@ -780,7 +1106,7 @@ class ZaloBot extends EventEmitter {
         }
       }
     } catch (err) {
-      this.log('warning', `Không thể tự mở cuộc trò chuyện với ${phone}: ${err.message}`);
+      this.log('warning', `Không thể tự mở cuộc trò chuyện với ${searchQuery}: ${err.message}`);
     }
     return this.getStatus();
   }
@@ -823,13 +1149,14 @@ class ZaloBot extends EventEmitter {
     }
 
     const settings = storage.getSettings();
-    const autoRotate = settings.autoRotateAccounts !== false;
+    const sendMode = options.sendMode || settings.sendMode || (settings.autoRotateAccounts ? 'ROUND_ROBIN' : 'SINGLE');
+    const autoRotate = sendMode === 'ROUND_ROBIN' || (sendMode !== 'SINGLE' && settings.autoRotateAccounts !== false);
 
     const allAccounts = storage.getAccounts();
     const activeAcc = storage.getActiveAccount();
     let candidates = [];
 
-    if (autoRotate && allAccounts.length > 1) {
+    if ((sendMode === 'PARALLEL' || autoRotate) && allAccounts.length > 1) {
       candidates = [activeAcc, ...allAccounts.filter((a) => a.id !== activeAcc.id)];
     } else {
       candidates = [activeAcc];
@@ -843,14 +1170,14 @@ class ZaloBot extends EventEmitter {
     }
     const participants = [{ id: candidates[0].id, name: candidates[0].name }];
 
-    if (autoRotate && candidates.length > 1) {
+    if ((sendMode === 'PARALLEL' || autoRotate) && candidates.length > 1) {
       for (let i = 1; i < candidates.length; i++) {
         const acc = candidates[i];
         const check = await this.ensureAccountReady(acc.id, 4000);
         if (check.ok) {
           participants.push({ id: acc.id, name: acc.name });
         } else {
-          this.log('info', `📱 [Luân phiên] "${acc.name}" chưa quét QR – sẽ bỏ qua hoặc nhắc khi tới lượt.`);
+          this.log('info', `📱 [Worker] "${acc.name}" chưa quét QR – sẽ bỏ qua hoặc nhắc khi tới lượt.`);
         }
       }
     }
@@ -861,9 +1188,17 @@ class ZaloBot extends EventEmitter {
       this.log('info', `🔄 Đã tự động đặt lại ${runnableCount} SĐT về trạng thái Chờ xử lý để bắt đầu gửi.`);
     }
 
+    // Khởi tạo Task Orchestrator & Worker Pool
+    taskEngine.initQueue(validContacts, {
+      mode: sendMode,
+      rotateEveryN: Number(settings.rotateEveryN) || 15
+    });
+    taskEngine.registerWorkers(participants);
+
     const campaign = {
       id: Date.now(),
       autoRotate: autoRotate && participants.length > 1,
+      sendMode,
       speedMode: 'BURST',
       participants,
       inFlight: new Set(),
@@ -890,10 +1225,14 @@ class ZaloBot extends EventEmitter {
     this.campaign = campaign;
     this.campaignState = 'RUNNING';
 
-    const modeText =
-      campaign.autoRotate
-        ? `Tự động chuyển lần lượt ${participants.length} tài khoản (${participants.map((p) => p.name).join(' ➔ ')})`
-        : `1 tài khoản ("${participants[0].name}")`;
+    let modeText = '';
+    if (sendMode === 'PARALLEL' && participants.length > 1) {
+      modeText = `⚡ Đa luồng song song cùng lúc ${participants.length} tài khoản (${participants.map((p) => p.name).join(' & ')})`;
+    } else if (campaign.autoRotate) {
+      modeText = `🔄 Luân phiên chuyển lần lượt ${participants.length} tài khoản (${participants.map((p) => p.name).join(' ➔ ')})`;
+    } else {
+      modeText = `1 tài khoản ("${participants[0].name}")`;
+    }
 
     this.log(
       'info',
@@ -902,8 +1241,63 @@ class ZaloBot extends EventEmitter {
       }.`
     );
 
-    campaign.promise = this.runSequentialCampaign(campaign);
+    if (sendMode === 'PARALLEL' && participants.length > 1) {
+      campaign.promise = this.runParallelCampaign(campaign);
+    } else {
+      campaign.promise = this.runSequentialCampaign(campaign);
+    }
     return this.getStatus();
+  }
+
+  /**
+   * Chế độ Đa Luồng Song Song (Concurrent Worker Pool)
+   * Tất cả các tài khoản Zalo cùng bốc việc từ Task Queue và gửi đồng thời độc lập.
+   */
+  async runParallelCampaign(campaign) {
+    const participants = campaign.participants;
+    this.log(
+      'info',
+      `⚡ [Worker Pool Song Song] Đang kích hoạt đồng thời ${participants.length} Worker độc lập...`
+    );
+
+    const workerPromises = participants.map(async (acc) => {
+      let worker = campaign.workers.get(acc.id);
+      if (!worker) {
+        worker = {
+          accountId: acc.id,
+          accountName: acc.name,
+          state: 'RUNNING',
+          processed: 0,
+          success: 0,
+          processedInBatch: 0,
+          countdownSec: 0,
+          currentPhone: '',
+          note: ''
+        };
+        campaign.workers.set(acc.id, worker);
+      }
+
+      const ready = await this.ensureAccountReady(acc.id);
+      if (!ready.ok) {
+        worker.state = 'STOPPED_ERROR';
+        worker.note = ready.reason;
+        taskEngine.updateWorkerStatus(acc.id, 'ERROR', ready.reason);
+        this.log('warning', `⚠️ Worker "${acc.name}" chưa sẵn sàng (${ready.reason}), tạm bỏ qua.`);
+        return;
+      }
+
+      taskEngine.updateWorkerStatus(acc.id, 'RUNNING', 'Đang nhận việc từ hàng đợi Task Queue...');
+      this.log('info', `🚀 Worker "${acc.name}" đã bắt đầu nhận việc từ hàng đợi.`);
+      return this.runWorker(campaign, worker, 0);
+    });
+
+    try {
+      await Promise.allSettled(workerPromises);
+    } catch (err) {
+      this.log('error', `Chiến dịch đa luồng song song gặp lỗi: ${err.message}`);
+    } finally {
+      this.finishCampaign(campaign);
+    }
   }
 
   async runSequentialCampaign(campaign) {
@@ -990,6 +1384,7 @@ class ZaloBot extends EventEmitter {
 
   finishCampaign(campaign) {
     campaign.finished = true;
+    taskEngine.checkCompletion();
 
     // Trả các số còn kẹt về hàng chờ
     for (const key of [...campaign.inFlight]) {
@@ -1028,6 +1423,7 @@ class ZaloBot extends EventEmitter {
   }
 
   pauseCampaign() {
+    taskEngine.pause();
     if (this.campaignState === 'RUNNING' || this.campaignState === 'SCHEDULED') {
       const wasRunning = this.campaignState === 'RUNNING';
       this.campaignState = 'PAUSED';
@@ -1045,16 +1441,20 @@ class ZaloBot extends EventEmitter {
   }
 
   async workerSleep(campaign, worker, seconds, state = 'RESTING') {
+    if (seconds <= 0) return;
     worker.state = state;
     worker.countdownSec = seconds;
+    taskEngine.setWorkerCountdown(worker.accountId, seconds, `Đang nghỉ giãn cách ${seconds}s`);
     this.scheduleStatusBroadcast();
     while (worker.countdownSec > 0 && this.isCampaignActive(campaign)) {
       await sleep(1000);
       worker.countdownSec = Math.max(0, worker.countdownSec - 1);
+      taskEngine.setWorkerCountdown(worker.accountId, worker.countdownSec, `Đang nghỉ giãn cách ${worker.countdownSec}s`);
       this.scheduleStatusBroadcast();
     }
     worker.countdownSec = 0;
     if (worker.state === state) worker.state = 'RUNNING';
+    taskEngine.updateWorkerStatus(worker.accountId, worker.state, '');
     this.scheduleStatusBroadcast();
   }
 
@@ -1086,13 +1486,15 @@ class ZaloBot extends EventEmitter {
         worker.state = 'DONE';
         worker.currentPhone = '';
         worker.note = 'Đã hết số cần gửi';
+        taskEngine.updateWorkerStatus(worker.accountId, 'IDLE', 'Đã hết số cần gửi');
         this.scheduleStatusBroadcast();
         return 'DONE';
       }
 
       worker.state = 'RUNNING';
       worker.currentPhone = contact.phone;
-      worker.note = '';
+      worker.note = `Đang gửi SĐT: ${contact.phone}`;
+      taskEngine.updateWorkerStatus(worker.accountId, 'RUNNING', `Đang gửi SĐT: ${contact.phone}`);
       this.scheduleStatusBroadcast();
 
       const messageToSend = renderMessage(settings.template, contact, {
@@ -1178,16 +1580,33 @@ class ZaloBot extends EventEmitter {
       }
 
       const batchSize = Math.max(1, Number(settings.batchSize) || 15);
-      if (worker.processedInBatch >= batchSize) {
+      const batchPauseSec =
+        settings.batchPauseSec !== undefined && settings.batchPauseSec !== ''
+          ? Math.max(0, Number(settings.batchPauseSec))
+          : 120;
+
+      if (batchPauseSec > 0 && worker.processedInBatch >= batchSize) {
         worker.processedInBatch = 0;
-        const pauseSec = Math.max(3, Number(settings.batchPauseSec) || 120);
-        this.log('info', `[${worker.accountName}] Đủ ${batchSize} số – nghỉ giữa chặng ${pauseSec} giây.`);
-        await this.workerSleep(campaign, worker, pauseSec);
+        this.log('info', `[${worker.accountName}] Đủ ${batchSize} số – nghỉ giữa chặng ${batchPauseSec} giây.`);
+        await this.workerSleep(campaign, worker, batchPauseSec);
       } else {
-        const minSec = Math.max(1, Number(settings.minDelaySec) || 12);
-        const maxSec = Math.max(minSec, Number(settings.maxDelaySec) || 25);
-        const sec = Math.floor(Math.random() * (maxSec - minSec + 1)) + minSec;
-        await this.workerSleep(campaign, worker, sec);
+        const minSec =
+          settings.minDelaySec !== undefined && settings.minDelaySec !== ''
+            ? Math.max(0, Number(settings.minDelaySec))
+            : 12;
+        const maxSec =
+          settings.maxDelaySec !== undefined && settings.maxDelaySec !== ''
+            ? Math.max(minSec, Number(settings.maxDelaySec))
+            : Math.max(minSec, 25);
+        const sec =
+          minSec === maxSec
+            ? minSec
+            : Math.floor(Math.random() * (maxSec - minSec + 1)) + minSec;
+        if (sec > 0) {
+          await this.workerSleep(campaign, worker, sec);
+        } else {
+          await sleep(100);
+        }
       }
     }
   }
@@ -1417,10 +1836,15 @@ class ZaloBot extends EventEmitter {
         await this.typeMultilineFast(page, messageToSend);
       }
 
-      await page.waitForTimeout(160);
+      const isTurbo =
+        settings.minDelaySec === 0 ||
+        settings.minDelaySec === '0' ||
+        Number(settings.minDelaySec) <= 1;
+
+      await page.waitForTimeout(isTurbo ? 50 : 160);
       await page.keyboard.press('Enter');
 
-      await page.waitForTimeout(1100);
+      await page.waitForTimeout(isTurbo ? 300 : 1100);
 
       const postSendCheck = await page.evaluate(() => {
         const text = document.body ? document.body.innerText.toLowerCase() : '';

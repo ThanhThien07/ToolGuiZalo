@@ -158,6 +158,7 @@ async function initApp() {
     renderTable();
     updatePreview();
     await loadReplies();
+    loadSyncInfo();
     switchPanel(state.currentPanel);
     connectSSE();
   } catch (err) {
@@ -180,12 +181,7 @@ function connectSSE() {
 
   evtSource.addEventListener('contact_updated', (e) => {
     const updated = JSON.parse(e.data);
-    const idx = state.contacts.findIndex((c) => c.id === updated.id);
-    if (idx !== -1) {
-      state.contacts[idx] = updated;
-    } else {
-      state.contacts.push(updated);
-    }
+    upsertContactInState(updated);
     renderTable();
     renderReplies();
     updateOverviewChart(state.status?.stats || {});
@@ -199,6 +195,62 @@ function connectSSE() {
     renderReplies();
     updateOverviewChart(state.status?.stats || {});
     updatePanelBadges();
+  });
+
+  evtSource.addEventListener('reply_received', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      const { contact, replyText, accountName } = data;
+      if (contact) {
+        upsertContactInState({ ...contact, hasReplied: true, replyText });
+      }
+      renderReplies();
+      updatePanelBadges();
+      playNotificationSound();
+      showReplyToast(
+        contact?.name || contact?.zaloName || contact?.phone || 'Khách hàng',
+        replyText,
+        accountName
+      );
+      // Nếu người dùng đang mở sẵn trang Khách Đã Phản Hồi thì đánh dấu đã xem luôn
+      if (state.currentPanel === 'replies') {
+        markRepliesSeenOnServer(contact?.id);
+      }
+    } catch (err) {
+      console.error('Lỗi nhận SSE reply_received:', err);
+    }
+  });
+
+  evtSource.addEventListener('replies_updated', (e) => {
+    try {
+      const replies = JSON.parse(e.data);
+      if (Array.isArray(replies)) {
+        replies.forEach((rep) => {
+          upsertContactInState(rep);
+        });
+        renderReplies();
+        updatePanelBadges();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  evtSource.addEventListener('sync_status', (e) => {
+    try {
+      const info = JSON.parse(e.data);
+      state.syncInfo = info;
+      renderSyncUI(info);
+      updatePanelBadges();
+    } catch (err) {}
+  });
+
+  evtSource.addEventListener('peer_connected', (e) => {
+    try {
+      const peer = JSON.parse(e.data);
+      showReplyToast(`Phát hiện máy "${peer.hostname}" (${peer.ip})`, 'Đã kết nối và tự động đồng bộ hai chiều', 'P2P LAN Sync');
+      loadSyncInfo();
+    } catch (err) {}
   });
 }
 
@@ -223,8 +275,37 @@ function applySettingsToForm(s) {
   chkUsePhoneCache.checked = Boolean(s.usePhoneCache);
   chkAutoAddFriend.checked = Boolean(s.autoAddFriendWhenBlocked);
 
+  // Cập nhật trạng thái hiển thị của nút Preset
+  if (Number(s.minDelaySec) <= 1 && Number(s.batchPauseSec) === 0) {
+    updateSpeedPresetUI('TURBO');
+  } else if (Number(s.minDelaySec) <= 4 && Number(s.batchPauseSec) <= 20) {
+    updateSpeedPresetUI('FAST');
+  } else {
+    updateSpeedPresetUI('SAFE');
+  }
+
   if (chkAutoRotateAccounts) {
     chkAutoRotateAccounts.checked = s.autoRotateAccounts !== false;
+  }
+
+  const optModeRoundRobin = document.getElementById('optModeRoundRobin');
+  const optModeParallel = document.getElementById('optModeParallel');
+  const badgeCurrentSendMode = document.getElementById('badgeCurrentSendMode');
+  const curMode = s.sendMode || (s.autoRotateAccounts !== false ? 'ROUND_ROBIN' : 'ROUND_ROBIN');
+  if (optModeParallel && optModeRoundRobin) {
+    if (curMode === 'PARALLEL') {
+      optModeParallel.checked = true;
+      if (badgeCurrentSendMode) {
+        badgeCurrentSendMode.textContent = '⚡ Song song Đa luồng';
+        badgeCurrentSendMode.className = 'badge bg-success px-2 py-1';
+      }
+    } else {
+      optModeRoundRobin.checked = true;
+      if (badgeCurrentSendMode) {
+        badgeCurrentSendMode.textContent = '🔄 Luân phiên (An toàn)';
+        badgeCurrentSendMode.className = 'badge bg-primary px-2 py-1';
+      }
+    }
   }
 
   chkScheduleEnabled.checked = Boolean(s.scheduleEnabled);
@@ -256,16 +337,22 @@ function updateScheduleVisualState() {
 }
 
 function collectSettingsFromForm() {
-  const isAutoRotate = chkAutoRotateAccounts ? chkAutoRotateAccounts.checked : true;
+  const optModeParallel = document.getElementById('optModeParallel');
+  const isParallel = optModeParallel ? optModeParallel.checked : false;
+  const sendMode = isParallel ? 'PARALLEL' : 'ROUND_ROBIN';
+
+  const minVal = numMinDelay.value !== '' ? Math.max(0, Number(numMinDelay.value)) : 12;
+  const maxVal = numMaxDelay.value !== '' ? Math.max(minVal, Number(numMaxDelay.value)) : Math.max(minVal, 25);
+  const pauseVal = numBatchPause.value !== '' ? Math.max(0, Number(numBatchPause.value)) : 120;
 
   return {
     template: txtTemplate.value,
-    autoRotateAccounts: isAutoRotate,
-    sendMode: isAutoRotate ? 'ROUND_ROBIN' : 'SINGLE_BURST',
-    minDelaySec: Math.max(1, Number(numMinDelay.value) || 12),
-    maxDelaySec: Math.max(1, Number(numMaxDelay.value) || 25),
+    autoRotateAccounts: true,
+    sendMode,
+    minDelaySec: minVal,
+    maxDelaySec: maxVal,
     batchSize: Math.max(1, Number(numBatchSize.value) || 15),
-    batchPauseSec: Math.max(3, Number(numBatchPause.value) || 120),
+    batchPauseSec: pauseVal,
     fastPasteMode: chkFastPasteMode.checked,
     useCustomMessageFirst: chkUseCustomFirst.checked,
     usePhoneCache: chkUsePhoneCache.checked,
@@ -397,12 +484,74 @@ function updateOverviewChart(stats = {}) {
 
 // ==================== QUẢN LÝ KHÁCH HÀNG ĐÃ PHẢN HỒI ====================
 
+function upsertContactInState(incoming) {
+  if (!incoming) return;
+  const isFromZaloWeb = !incoming.phone || incoming.phone === 'Từ Zalo Web';
+  const incName = String(incoming.name || incoming.zaloName || '')
+    .toLowerCase()
+    .trim();
+
+  const idx = (state.contacts || []).findIndex((c) => {
+    if (incoming.id && c.id === incoming.id) return true;
+    if (!isFromZaloWeb && c.phone === incoming.phone) return true;
+    if (isFromZaloWeb && (!c.phone || c.phone === 'Từ Zalo Web')) {
+      const cName = String(c.name || c.zaloName || '')
+        .toLowerCase()
+        .trim();
+      return (
+        cName === incName &&
+        (c.replyByAccountId || '') === (incoming.replyByAccountId || '')
+      );
+    }
+    return false;
+  });
+
+  if (idx !== -1) {
+    state.contacts[idx] = { ...state.contacts[idx], ...incoming };
+  } else {
+    state.contacts.unshift(incoming);
+  }
+}
+
+function getUniqueRepliedContacts() {
+  const seenKeys = new Set();
+  const list = [];
+  for (const c of state.contacts || []) {
+    if (!c || (!c.hasReplied && !c.replyText)) continue;
+    const isFromZaloWeb = !c.phone || c.phone === 'Từ Zalo Web';
+    const normName = String(c.name || c.zaloName || '')
+      .toLowerCase()
+      .trim();
+    const key = isFromZaloWeb
+      ? `zw__${normName}__${c.replyByAccountId || c.replyByAccount || ''}`
+      : `ph__${c.phone}`;
+    if (seenKeys.has(key) || (c.id && seenKeys.has(`id__${c.id}`))) continue;
+    seenKeys.add(key);
+    if (c.id) seenKeys.add(`id__${c.id}`);
+    list.push(c);
+  }
+  return list;
+}
+
+async function markRepliesSeenOnServer(contactId = null) {
+  try {
+    await fetch('/api/replies/seen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactId })
+    });
+  } catch (err) {
+    // ignore
+  }
+}
+
 async function loadReplies() {
   try {
     const res = await fetch('/api/replies');
     const data = await res.json();
     if (data.ok) {
       state.replies = data.replies || [];
+      state.replies.forEach((rep) => upsertContactInState(rep));
       renderReplies();
       updatePanelBadges();
     }
@@ -412,6 +561,14 @@ async function loadReplies() {
 }
 
 function renderReplies() {
+  const allReplied = getUniqueRepliedContacts();
+  if (badgeRepliesCount) {
+    badgeRepliesCount.textContent = `${allReplied.length} rep`;
+  }
+  if (repliesCountHeaderBadge) {
+    repliesCountHeaderBadge.textContent = `${allReplied.length} khách đã phản hồi`;
+  }
+
   if (!repliesTableBody) return;
 
   // Cập nhật danh sách options trong select lọc nick nếu chưa có
@@ -426,14 +583,6 @@ function renderReplies() {
 
   const q = (state.repliesSearchQuery || '').trim().toLowerCase();
   const accFilter = state.repliesFilterAccount || 'ALL';
-
-  const allReplied = (state.contacts || []).filter((c) => c.hasReplied || c.replyText);
-  if (badgeRepliesCount) {
-    badgeRepliesCount.textContent = `${allReplied.length} rep`;
-  }
-  if (repliesCountHeaderBadge) {
-    repliesCountHeaderBadge.textContent = `${allReplied.length} khách đã phản hồi`;
-  }
 
   const filtered = allReplied.filter((c) => {
     if (accFilter !== 'ALL') {
@@ -467,6 +616,7 @@ function renderReplies() {
       const badgeClass = isDefaultAcc ? 'bg-primary' : 'bg-info text-dark';
       const replyTime = c.replyAt ? new Date(c.replyAt).toLocaleString('vi-VN') : 'Vừa xong';
       const sentTime = c.sentAt ? new Date(c.sentAt).toLocaleString('vi-VN') : '';
+      const safeName = escapeHtml(c.name || c.zaloName || '').replace(/'/g, "\\'");
 
       return `
         <tr>
@@ -496,7 +646,7 @@ function renderReplies() {
             </div>
           </td>
           <td class="text-center">
-            <button class="btn btn-outline-primary btn-sm fw-semibold" onclick="openChatWithContact('${c.phone}', '${c.replyByAccountId || ''}')" title="Mở cuộc trò chuyện trên Zalo Web">
+            <button class="btn btn-outline-primary btn-sm fw-semibold" onclick="openChatWithContact('${c.phone}', '${c.replyByAccountId || ''}', '${safeName}')" title="Mở cuộc trò chuyện trên Zalo Web">
               <i class="bi bi-chat-dots-fill"></i> Mở chat
             </button>
           </td>
@@ -506,12 +656,13 @@ function renderReplies() {
     .join('');
 }
 
-window.openChatWithContact = async function (phone, accountId) {
+window.openChatWithContact = async function (phone, accountId, contactName = '') {
   try {
+    markRepliesSeenOnServer(phone !== 'Từ Zalo Web' ? phone : contactName);
     const res = await fetch('/api/browser/open-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, accountId })
+      body: JSON.stringify({ phone, accountId, contactName })
     });
     const data = await res.json();
     if (data.error) {
@@ -523,6 +674,187 @@ window.openChatWithContact = async function (phone, accountId) {
     alert(`Không thể mở chat: ${err.message}`);
   }
 };
+
+// ==================== HỆ THỐNG ÂM THANH & THÔNG BÁO REALTIME ====================
+
+function playNotificationSound() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const now = ctx.currentTime;
+
+    // Nốt 1 (E5 - 659.25 Hz)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(659.25, now);
+    gain1.gain.setValueAtTime(0.15, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.25);
+
+    // Nốt 2 (A5 - 880.00 Hz)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.1);
+    gain2.gain.setValueAtTime(0.18, now + 0.1);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.1);
+    osc2.stop(now + 0.4);
+  } catch (err) {
+    // quiet fallback
+  }
+}
+
+function showReplyToast(customerName, replyText, accountName) {
+  let toastContainer = document.getElementById('replyToastContainer');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'replyToastContainer';
+    toastContainer.style.position = 'fixed';
+    toastContainer.style.bottom = '14px';
+    toastContainer.style.right = '14px';
+    toastContainer.style.zIndex = '999999';
+    toastContainer.style.display = 'flex';
+    toastContainer.style.flexDirection = 'column';
+    toastContainer.style.gap = '6px';
+    toastContainer.style.pointerEvents = 'none';
+    document.body.appendChild(toastContainer);
+  }
+
+  // Không chồng nhiều thông báo của cùng 1 khách hàng
+  const safeKey = 'toast_cust_' + String(customerName + '_' + accountName).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const existing = document.getElementById(safeKey);
+  if (existing) existing.remove();
+
+  const toastEl = document.createElement('div');
+  toastEl.id = safeKey;
+  toastEl.style.pointerEvents = 'auto';
+  toastEl.style.cursor = 'pointer';
+  toastEl.style.background = 'linear-gradient(135deg, #0f766e, #15803d)';
+  toastEl.style.color = '#ffffff';
+  toastEl.style.padding = '7px 12px';
+  toastEl.style.borderRadius = '8px';
+  toastEl.style.fontSize = '12.5px';
+  toastEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.18)';
+  toastEl.style.display = 'flex';
+  toastEl.style.alignItems = 'center';
+  toastEl.style.gap = '8px';
+  toastEl.style.maxWidth = '340px';
+  toastEl.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+  toastEl.title = 'Click để xem danh sách khách hàng phản hồi';
+
+  toastEl.innerHTML = `
+    <span style="font-size: 14px;">🔔</span>
+    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      <b>${escapeHtml(customerName)}</b> phản hồi tại <b>${escapeHtml(accountName || 'Zalo')}</b>
+    </span>
+  `;
+
+  toastEl.addEventListener('click', () => {
+    toastEl.remove();
+    switchPanel('replies');
+  });
+
+  toastContainer.appendChild(toastEl);
+
+  setTimeout(() => {
+    if (toastEl && toastEl.parentNode) {
+      toastEl.style.opacity = '0';
+      toastEl.style.transform = 'translateY(6px)';
+      setTimeout(() => {
+        if (toastEl && toastEl.parentNode) toastEl.remove();
+      }, 200);
+    }
+  }, 2000);
+}
+
+// ==================== CÀI ĐẶT PRESET TỐC ĐỘ GỬI ====================
+
+const btnPresetTurbo = document.getElementById('btnPresetTurbo');
+const btnPresetFast = document.getElementById('btnPresetFast');
+const btnPresetSafe = document.getElementById('btnPresetSafe');
+const badgeSpeedPresetName = document.getElementById('badgeSpeedPresetName');
+const lblSpeedPresetHelp = document.getElementById('lblSpeedPresetHelp');
+
+function updateSpeedPresetUI(mode) {
+  if (btnPresetTurbo) btnPresetTurbo.classList.remove('active');
+  if (btnPresetFast) btnPresetFast.classList.remove('active');
+  if (btnPresetSafe) btnPresetSafe.classList.remove('active');
+
+  if (mode === 'TURBO') {
+    if (btnPresetTurbo) btnPresetTurbo.classList.add('active');
+    if (badgeSpeedPresetName) {
+      badgeSpeedPresetName.className = 'speed-status-pill preset-turbo';
+      badgeSpeedPresetName.textContent = '⚡ Siêu Tốc';
+    }
+    if (lblSpeedPresetHelp) {
+      lblSpeedPresetHelp.innerHTML = 'Bắn liên tục <b>0 – 1s</b>, không nghỉ chặng. Tối ưu khi gửi 5.000 SĐT đa luồng.';
+    }
+  } else if (mode === 'FAST') {
+    if (btnPresetFast) btnPresetFast.classList.add('active');
+    if (badgeSpeedPresetName) {
+      badgeSpeedPresetName.className = 'speed-status-pill preset-fast';
+      badgeSpeedPresetName.textContent = '🚀 Nhanh';
+    }
+    if (lblSpeedPresetHelp) {
+      lblSpeedPresetHelp.innerHTML = 'Nghỉ <b>2 – 4s</b> mỗi tin, tạm nghỉ 15s sau mỗi 30 SĐT. Cân bằng tốc độ & an toàn.';
+    }
+  } else if (mode === 'SAFE') {
+    if (btnPresetSafe) btnPresetSafe.classList.add('active');
+    if (badgeSpeedPresetName) {
+      badgeSpeedPresetName.className = 'speed-status-pill preset-safe';
+      badgeSpeedPresetName.textContent = '🛡️ An Toàn';
+    }
+    if (lblSpeedPresetHelp) {
+      lblSpeedPresetHelp.innerHTML = 'Nghỉ <b>12 – 25s</b> mỗi tin, tạm nghỉ 120s sau mỗi 15 SĐT. Phù hợp cho nick mới.';
+    }
+  }
+}
+
+function setSpeedPreset(mode) {
+  updateSpeedPresetUI(mode);
+
+  if (mode === 'TURBO') {
+    if (numMinDelay) numMinDelay.value = 0;
+    if (numMaxDelay) numMaxDelay.value = 1;
+    if (numBatchSize) numBatchSize.value = 100;
+    if (numBatchPause) numBatchPause.value = 0;
+    if (chkFastPasteMode) chkFastPasteMode.checked = true;
+
+    // Tự động chuyển sang chế độ Gửi Song Song nếu có >= 2 nick
+    const optModeParallel = document.getElementById('optModeParallel');
+    if (optModeParallel && (state.accounts || []).length >= 2) {
+      optModeParallel.checked = true;
+      const badgeCurrentSendMode = document.getElementById('badgeCurrentSendMode');
+      if (badgeCurrentSendMode) {
+        badgeCurrentSendMode.textContent = '⚡ Song song Đa luồng';
+        badgeCurrentSendMode.className = 'badge bg-success px-2 py-1';
+      }
+    }
+  } else if (mode === 'FAST') {
+    if (numMinDelay) numMinDelay.value = 2;
+    if (numMaxDelay) numMaxDelay.value = 4;
+    if (numBatchSize) numBatchSize.value = 30;
+    if (numBatchPause) numBatchPause.value = 15;
+    if (chkFastPasteMode) chkFastPasteMode.checked = true;
+  } else if (mode === 'SAFE') {
+    if (numMinDelay) numMinDelay.value = 12;
+    if (numMaxDelay) numMaxDelay.value = 25;
+    if (numBatchSize) numBatchSize.value = 15;
+    if (numBatchPause) numBatchPause.value = 120;
+  }
+}
+
+if (btnPresetTurbo) btnPresetTurbo.addEventListener('click', () => setSpeedPreset('TURBO'));
+if (btnPresetFast) btnPresetFast.addEventListener('click', () => setSpeedPreset('FAST'));
+if (btnPresetSafe) btnPresetSafe.addEventListener('click', () => setSpeedPreset('SAFE'));
 
 // ==================== QUẢN LÝ HÌNH ẢNH ĐÍNH KÈM ====================
 
@@ -687,24 +1019,27 @@ function renderAccounts() {
 }
 
 window.openAccountQr = async function (accountId) {
-  const res = await fetch('/api/browser/open', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId })
-  });
-  const data = await res.json();
-  if (data.error) {
-    alert(data.error);
-    return;
+  state.activeAccountId = accountId;
+  renderAccounts();
+  openQrModal(); // Mở modal ngay lập tức 0ms!
+
+  try {
+    const res = await fetch('/api/browser/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId })
+    });
+    const data = await res.json();
+    if (data.status) {
+      state.status = data.status;
+      if (data.status.accounts) state.accounts = data.status.accounts;
+      if (data.status.activeAccountId) state.activeAccountId = data.status.activeAccountId;
+      renderStatus(data.status);
+      renderAccounts();
+    }
+  } catch (err) {
+    // quiet
   }
-  if (data.status) {
-    state.status = data.status;
-    if (data.status.accounts) state.accounts = data.status.accounts;
-    if (data.status.activeAccountId) state.activeAccountId = data.status.activeAccountId;
-    renderStatus(data.status);
-    renderAccounts();
-  }
-  openQrModal();
 };
 
 window.switchActiveAccount = async function (accountId, openModal = false) {
@@ -972,7 +1307,8 @@ function switchPanel(panelId) {
       'panel-mode-import',
       'panel-mode-message',
       'panel-mode-table',
-      'panel-mode-replies'
+      'panel-mode-replies',
+      'panel-mode-sync'
     );
     mainContainer.classList.add(`panel-mode-${state.currentPanel}`);
   }
@@ -989,10 +1325,22 @@ function switchPanel(panelId) {
     renderTable();
   } else if (state.currentPanel === 'replies') {
     renderReplies();
+    markRepliesSeenOnServer();
+  } else if (state.currentPanel === 'sync') {
+    loadSyncInfo();
   }
 }
 
 function updatePanelBadges() {
+  const badgeSyncPeers = document.getElementById('badgeSyncPeers');
+  const lblSyncPeersCount = document.getElementById('lblSyncPeersCount');
+  const peersCount = state.syncInfo?.peersCount || (state.syncInfo?.peers ? state.syncInfo.peers.length : 0);
+  if (badgeSyncPeers) {
+    badgeSyncPeers.textContent = `${peersCount} máy`;
+  }
+  if (lblSyncPeersCount) {
+    lblSyncPeersCount.textContent = `P2P: ${peersCount} máy`;
+  }
   if (badgeAccountsCount) {
     badgeAccountsCount.textContent = `${(state.accounts || []).length} nick`;
   }
@@ -1009,9 +1357,12 @@ function updatePanelBadges() {
     const pendingCount = (state.status?.stats?.pending ?? 0) + (state.status?.stats?.processing ?? 0);
     badgeTablePending.textContent = `${pendingCount} chờ`;
   }
+  const repCount = getUniqueRepliedContacts().length;
   if (badgeRepliesCount) {
-    const repCount = (state.contacts || []).filter((c) => c.hasReplied || c.replyText).length;
     badgeRepliesCount.textContent = `${repCount} rep`;
+  }
+  if (repliesCountHeaderBadge) {
+    repliesCountHeaderBadge.textContent = `${repCount} khách đã phản hồi`;
   }
 }
 
@@ -1410,24 +1761,60 @@ if (selRepliesFilterAccount) {
 
 // ==================== FORM QUÉT QR & POPUP LIVE SCREENSHOT ====================
 
+let isFetchingLiveScreenshot = false;
+const liveZaloImageSpinner = document.getElementById('liveZaloImageSpinner');
+
 async function refreshLiveScreenshot() {
   if (qrModalOverlay.classList.contains('hidden')) return;
+  if (isFetchingLiveScreenshot) return; // Tránh dồn ứ request khi mạng LAN chậm
+  isFetchingLiveScreenshot = true;
+
   try {
-    const res = await fetch('/api/browser/screenshot');
+    const res = await fetch(`/api/browser/screenshot?t=${Date.now()}`);
     const data = await res.json();
     if (data.ok && data.imageBase64) {
-      liveZaloImage.src = data.imageBase64;
+      if (liveZaloImage.src !== data.imageBase64) {
+        liveZaloImage.src = data.imageBase64;
+      }
+      liveZaloImage.style.display = 'inline-block';
+      if (liveZaloImageSpinner) liveZaloImageSpinner.style.display = 'none';
+
+      // Cập nhật thanh trạng thái
+      if (data.isLoggedIn) {
+        if (qrModalStatusBar) {
+          qrModalStatusBar.className = 'alert alert-success py-2 px-3 mb-2 small fw-semibold d-flex align-items-center justify-content-between';
+        }
+        if (qrModalStatusText) {
+          qrModalStatusText.innerHTML = '🟢 <b>ĐÃ ĐĂNG NHẬP ZALO THÀNH CÔNG!</b> Bạn có thể bấm "✖ Đóng Form" bất cứ lúc nào.';
+        }
+      } else {
+        if (qrModalStatusBar) {
+          qrModalStatusBar.className = 'alert alert-warning py-2 px-3 mb-2 small fw-semibold d-flex align-items-center justify-content-between';
+        }
+        if (qrModalStatusText) {
+          qrModalStatusText.innerHTML = '🟡 Đang chờ quét mã QR hoặc chọn tài khoản Zalo trên màn hình...';
+        }
+      }
     }
   } catch {
     // ignore screenshot network hiccup
+  } finally {
+    isFetchingLiveScreenshot = false;
   }
 }
 
 function openQrModal() {
   qrModalOverlay.classList.remove('hidden');
+  if (liveZaloImage.src) {
+    liveZaloImage.style.display = 'inline-block';
+    if (liveZaloImageSpinner) liveZaloImageSpinner.style.display = 'none';
+  } else {
+    liveZaloImage.style.display = 'none';
+    if (liveZaloImageSpinner) liveZaloImageSpinner.style.display = 'flex';
+  }
   refreshLiveScreenshot();
   if (!liveScreenshotTimer) {
-    liveScreenshotTimer = setInterval(refreshLiveScreenshot, 1100);
+    liveScreenshotTimer = setInterval(refreshLiveScreenshot, 380); // Tốc độ siêu mượt 380ms/khung hình (~2.6 FPS)
   }
 }
 
@@ -1464,32 +1851,32 @@ liveZaloImage.addEventListener('click', async (e) => {
   if (!rect.width || !rect.height) return;
   const xRatio = (e.clientX - rect.left) / rect.width;
   const yRatio = (e.clientY - rect.top) / rect.height;
-  const res = await fetch('/api/browser/click', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ xRatio, yRatio })
-  });
-  const data = await res.json();
-  if (data.imageBase64) {
-    liveZaloImage.src = data.imageBase64;
-  }
+  try {
+    const res = await fetch('/api/browser/click', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ xRatio, yRatio })
+    });
+    const data = await res.json();
+    if (data.imageBase64) {
+      liveZaloImage.src = data.imageBase64;
+    }
+  } catch (err) {}
+  // Làm mới khung hình phản hồi thao tác click sau 80ms
+  setTimeout(refreshLiveScreenshot, 80);
 });
 
 if (btnOpenBrowser) {
   btnOpenBrowser.addEventListener('click', async () => {
-    btnOpenBrowser.disabled = true;
+    openQrModal(); // Mở ngay lập tức 0ms không chờ backend!
     try {
       const res = await fetch('/api/browser/open', { method: 'POST' });
       const data = await res.json();
       if (data.error) {
         alert(data.error);
-      } else {
-        openQrModal();
       }
     } catch (err) {
-      alert(`Lỗi mở Zalo Web: ${err.message}`);
-    } finally {
-      btnOpenBrowser.disabled = false;
+      console.error(err);
     }
   });
 }
@@ -1497,6 +1884,173 @@ if (btnOpenBrowser) {
 if (btnCloseBrowser) {
   btnCloseBrowser.addEventListener('click', async () => {
     await fetch('/api/browser/close', { method: 'POST' });
+  });
+}
+
+// ==================== PANEL 7: P2P LAN SYNCHRONIZATION ====================
+
+const btnTriggerSyncNow = document.getElementById('btnTriggerSyncNow');
+const btnAddManualPeer = document.getElementById('btnAddManualPeer');
+const txtManualPeerIp = document.getElementById('txtManualPeerIp');
+const btnSyncLANHeader = document.getElementById('btnSyncLANHeader');
+const lblSyncLocalHostname = document.getElementById('lblSyncLocalHostname');
+const lblSyncLocalIp = document.getElementById('lblSyncLocalIp');
+const lblPeersConnectedCount = document.getElementById('lblPeersConnectedCount');
+const tblSyncPeersBody = document.getElementById('tblSyncPeersBody');
+
+async function loadSyncInfo() {
+  try {
+    const res = await fetch('/api/sync/info');
+    const data = await res.json();
+    state.syncInfo = data;
+    renderSyncUI(data);
+    updatePanelBadges();
+  } catch (err) {
+    console.error('Lỗi tải thông tin đồng bộ P2P:', err);
+  }
+}
+
+function renderSyncUI(info) {
+  if (!info) return;
+  if (lblSyncLocalHostname) lblSyncLocalHostname.textContent = info.hostname || '-';
+  if (lblSyncLocalIp) lblSyncLocalIp.textContent = `${info.localIP}:${info.port}`;
+
+  const peers = info.peers || [];
+  if (lblPeersConnectedCount) lblPeersConnectedCount.textContent = `${peers.length} máy`;
+
+  if (!tblSyncPeersBody) return;
+  if (peers.length === 0) {
+    tblSyncPeersBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-center py-4 text-muted small">
+          Chưa phát hiện máy nào khác trong mạng. Hãy mở tool trên máy khác cùng mạng Wi-Fi/LAN (hệ thống sẽ tự nhận diện qua UDP broadcast) hoặc nhập IP thủ công bên trên.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tblSyncPeersBody.innerHTML = peers
+    .map((p) => {
+      const timeAgoSec = Math.round((Date.now() - (p.lastSeen || Date.now())) / 1000);
+      const timeStr = timeAgoSec < 10 ? 'Vừa xong' : `${timeAgoSec}s trước`;
+      return `
+        <tr>
+          <td class="fw-semibold text-dark">
+            <i class="bi bi-laptop me-1 text-primary"></i> ${escapeHtml(p.hostname || 'Máy trạm')}
+          </td>
+          <td>
+            <code class="fw-bold text-primary">${escapeHtml(p.ip)}:${escapeHtml(p.port)}</code>
+          </td>
+          <td>
+            <span class="badge bg-success-subtle text-success border border-success-subtle">
+              🟢 Trực tuyến & Đã gộp dữ liệu
+            </span>
+          </td>
+          <td class="small text-muted">${timeStr}</td>
+          <td class="text-end">
+            <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="syncWithSpecificPeer('${escapeHtml(p.ip)}', ${p.port})">
+              ⚡ Gộp ngay
+            </button>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+window.syncWithSpecificPeer = async function (ip, port) {
+  try {
+    const res = await fetch('/api/sync/trigger', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      alert(`Đã hoàn tất đồng bộ với các máy!`);
+      const sRes = await fetch('/api/state');
+      const sData = await sRes.json();
+      state.contacts = sData.contacts || [];
+      state.settings = sData.settings || {};
+      renderTable();
+      renderReplies();
+      updateOverviewChart(sData.status?.stats || {});
+      updatePanelBadges();
+      loadSyncInfo();
+    }
+  } catch (err) {
+    alert(`Lỗi đồng bộ: ${err.message}`);
+  }
+};
+
+if (btnTriggerSyncNow) {
+  btnTriggerSyncNow.addEventListener('click', async () => {
+    btnTriggerSyncNow.disabled = true;
+    btnTriggerSyncNow.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Đang đồng bộ...';
+    try {
+      const res = await fetch('/api/sync/trigger', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        const sRes = await fetch('/api/state');
+        const sData = await sRes.json();
+        state.contacts = sData.contacts || [];
+        state.settings = sData.settings || {};
+        renderTable();
+        renderReplies();
+        updateOverviewChart(sData.status?.stats || {});
+        updatePanelBadges();
+        loadSyncInfo();
+        alert(`Đã hoàn tất đồng bộ! Hiện đang kết nối với ${data.peersCount || 0} máy.`);
+      } else {
+        alert(data.error || 'Lỗi khi đồng bộ.');
+      }
+    } catch (err) {
+      alert(`Lỗi khi đồng bộ: ${err.message}`);
+    } finally {
+      btnTriggerSyncNow.disabled = false;
+      btnTriggerSyncNow.innerHTML = '<i class="bi bi-arrow-repeat"></i><span>⚡ Đồng Bộ Ngay</span>';
+    }
+  });
+}
+
+if (btnAddManualPeer) {
+  btnAddManualPeer.addEventListener('click', async () => {
+    const ip = (txtManualPeerIp ? txtManualPeerIp.value.trim() : '');
+    if (!ip) {
+      alert('Vui lòng nhập địa chỉ IP của máy cần kết nối.');
+      return;
+    }
+    btnAddManualPeer.disabled = true;
+    try {
+      const res = await fetch('/api/sync/add-peer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, port: 3000 })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (txtManualPeerIp) txtManualPeerIp.value = '';
+        alert(`Đã kết nối thành công tới ${ip}:3000 và gộp dữ liệu!`);
+        const sRes = await fetch('/api/state');
+        const sData = await sRes.json();
+        state.contacts = sData.contacts || [];
+        state.settings = sData.settings || {};
+        renderTable();
+        renderReplies();
+        updateOverviewChart(sData.status?.stats || {});
+        updatePanelBadges();
+        loadSyncInfo();
+      } else {
+        alert(data.error || 'Không thể kết nối tới IP này. Vui lòng kiểm tra tường lửa/Firewall và cùng cổng 3000.');
+      }
+    } catch (err) {
+      alert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      btnAddManualPeer.disabled = false;
+    }
+  });
+}
+
+if (btnSyncLANHeader) {
+  btnSyncLANHeader.addEventListener('click', () => {
+    switchPanel('sync');
   });
 }
 

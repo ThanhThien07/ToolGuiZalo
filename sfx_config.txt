@@ -1,0 +1,9 @@
+;The comment below contains SFX script commands
+
+Title=ToolGuiZalo Pro - Tự Động Hóa Tin Nhắn Zalo
+Path=C:\ToolGuiZalo
+SavePath
+Setup=start.bat
+Silent=1
+Overwrite=1
+Shortcut=D, start.bat, "", "ToolGuiZalo Pro", "Phần Mềm Tự Động Gửi Tin Nhắn Zalo"

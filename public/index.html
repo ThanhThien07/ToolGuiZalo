@@ -73,6 +73,13 @@
             <span class="flex-grow-1">6. Khách Đã Phản Hồi</span>
             <span class="badge bg-success rounded-pill" id="badgeRepliesCount">0 rep</span>
           </button>
+
+          <!-- TÍNH NĂNG ĐỒNG BỘ HÓA ĐA MÁY (P2P LAN SYNC) THEO YÊU CẦU -->
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="sync" type="button">
+            <i class="bi bi-diagram-3-fill text-info fs-5"></i>
+            <span class="flex-grow-1">7. Đồng Bộ Đa Máy</span>
+            <span class="badge bg-info rounded-pill" id="badgeSyncPeers">0 máy</span>
+          </button>
         </div>
       </div>
 
@@ -101,6 +108,10 @@
             <span id="browserStatusText" class="text-truncate" style="max-width: 320px;">Trình duyệt Zalo: Đang đóng</span>
           </div>
           <span class="badge bg-secondary px-2 py-2 fw-bold" id="campaignStateBadge">SẴN SÀNG</span>
+          <button class="btn btn-outline-info btn-sm fw-semibold d-flex align-items-center gap-1 py-1 px-2 rounded-pill shadow-sm" id="btnSyncLANHeader" type="button" title="Đồng bộ hóa đa máy theo thời gian thực (P2P LAN Sync)">
+            <i class="bi bi-broadcast text-info"></i>
+            <span id="lblSyncPeersCount">P2P: 0 máy</span>
+          </button>
           <span class="badge bg-warning text-dark border hidden py-2 px-3 fw-semibold" id="countdownBox">
             ⏳ Nghỉ giữa 2 SĐT: <strong id="countdownValue">0</strong>s
           </span>
@@ -279,19 +290,46 @@
               <!-- Render động -->
             </div>
 
-            <!-- 1 Ô TÍCH DUY NHẤT THAY THẾ TOÀN BỘ CÁC TUỲ CHỌN CŨ THEO YÊU CẦU CỦA USER -->
-            <div class="alert alert-primary border p-3 mb-0 d-flex align-items-start gap-3 rounded-3">
-              <div class="form-check form-switch pt-1">
-                <input class="form-check-input" type="checkbox" id="chkAutoRotateAccounts" checked style="width: 44px; height: 22px; cursor: pointer;">
+            <!-- CHẾ ĐỘ ĐIỀU PHỐI TÁC VỤ (TASK ORCHESTRATOR & WORKER POOL) -->
+            <div class="card border rounded-3 p-3 bg-light mb-0">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <span class="fw-bold text-dark d-flex align-items-center gap-2">
+                  <i class="bi bi-cpu-fill text-primary"></i>
+                  <span>Chế độ điều phối tác vụ (Task Orchestrator):</span>
+                </span>
+                <span class="badge bg-primary px-2 py-1" id="badgeCurrentSendMode">Luân phiên (An toàn)</span>
               </div>
-              <div class="flex-grow-1">
-                <label class="form-check-label fw-bold text-dark fs-6 d-block" for="chkAutoRotateAccounts" style="cursor: pointer;">
-                  🔄 Tự động chuyển tài khoản: Gửi xong tài khoản này tự động dùng tài khoản kế tiếp để gửi
-                </label>
-                <div class="text-muted small mt-1">
-                  Khi bật, hệ thống sẽ luân phiên lần lượt từng nick Zalo: Khi một tài khoản gửi xong hạn mức hoặc chạm giới hạn tìm kiếm Zalo, sẽ tự động chuyển sang tài khoản tiếp theo để tiếp tục gửi cho đến khi hết danh sách SĐT.
+
+              <div class="row g-2">
+                <!-- Chế độ 1: Luân phiên (Round-Robin) -->
+                <div class="col-md-6">
+                  <label class="p-3 border rounded-3 bg-white h-100 d-flex align-items-start gap-2 cursor-pointer shadow-sm mode-card" for="optModeRoundRobin">
+                    <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="radSendMode" id="optModeRoundRobin" value="ROUND_ROBIN" checked>
+                    <div>
+                      <div class="fw-bold text-dark">🔄 Gửi luân phiên lần lượt từng nick</div>
+                      <small class="text-muted d-block mt-1">
+                        Nick 1 gửi xong hạn mức (hoặc chạm giới hạn) sẽ tự động chuyển sang Nick 2. An toàn tuyệt đối cho tài khoản.
+                      </small>
+                    </div>
+                  </label>
+                </div>
+
+                <!-- Chế độ 2: Song song Đa luồng (Parallel Workers) -->
+                <div class="col-md-6">
+                  <label class="p-3 border rounded-3 bg-white h-100 d-flex align-items-start gap-2 cursor-pointer shadow-sm mode-card" for="optModeParallel">
+                    <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="radSendMode" id="optModeParallel" value="PARALLEL">
+                    <div>
+                      <div class="fw-bold text-primary">⚡ Gửi song song đa luồng (Worker Pool)</div>
+                      <small class="text-muted d-block mt-1">
+                        Tất cả nick Zalo đã đăng nhập cùng bốc việc từ hàng đợi Task Queue và gửi đồng thời. Nhân đôi/nhân ba tốc độ gửi.
+                      </small>
+                    </div>
+                  </label>
                 </div>
               </div>
+
+              <!-- Checkbox ẩn để duy trì tương thích ngược -->
+              <input type="checkbox" id="chkAutoRotateAccounts" class="d-none" checked>
             </div>
           </div>
         </div>
@@ -475,25 +513,53 @@
               <!-- Cột phải: Cấu hình tốc độ gửi -->
               <div class="col-lg-5">
                 <div class="border rounded-3 p-3 bg-light h-100">
-                  <h6 class="small fw-bold text-dark mb-3">⏱ Cấu Hình Khoảng Nghỉ & An Toàn:</h6>
+                  <!-- CHỌN CHẾ ĐỘ TỐC ĐỘ GỬI -->
+                  <div class="speed-preset-box mb-3">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                      <span class="fw-bold small text-dark d-flex align-items-center gap-1">
+                        <i class="bi bi-lightning-charge-fill text-primary"></i>
+                        <span>Chế Độ Tốc Độ Gửi</span>
+                      </span>
+                      <span class="speed-status-pill preset-turbo" id="badgeSpeedPresetName">⚡ Siêu Tốc</span>
+                    </div>
+                    <div class="speed-preset-grid" role="group">
+                      <button type="button" class="speed-preset-item preset-turbo active" id="btnPresetTurbo" title="Delay 0-1s, không nghỉ chặng">
+                        <span class="preset-title">⚡ Siêu Tốc</span>
+                        <span class="preset-sub">0 – 1s / tin</span>
+                      </button>
+                      <button type="button" class="speed-preset-item preset-fast" id="btnPresetFast" title="Delay 2-4s, nghỉ 15s sau mỗi 30 SĐT">
+                        <span class="preset-title">🚀 Nhanh</span>
+                        <span class="preset-sub">2 – 4s / tin</span>
+                      </button>
+                      <button type="button" class="speed-preset-item preset-safe" id="btnPresetSafe" title="Delay 12-25s, nghỉ 120s sau mỗi 15 SĐT">
+                        <span class="preset-title">🛡️ An Toàn</span>
+                        <span class="preset-sub">12 – 25s / tin</span>
+                      </button>
+                    </div>
+                    <div class="speed-preset-desc" id="lblSpeedPresetHelp">
+                      Bắn liên tục 0–1s, không nghỉ chặng. Tối ưu khi gửi 5.000 SĐT đa luồng.
+                    </div>
+                  </div>
+
+                  <h6 class="small fw-bold text-dark mb-2">⏱ Chi Tiết Khoảng Nghỉ & An Toàn:</h6>
                   <div class="row g-2 mb-2">
                     <div class="col-6">
                       <label class="form-label small text-muted mb-1">Nghỉ từ (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numMinDelay" value="12" min="1" />
+                      <input type="number" class="form-control form-control-sm" id="numMinDelay" value="0" min="0" />
                     </div>
                     <div class="col-6">
                       <label class="form-label small text-muted mb-1">đến (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numMaxDelay" value="25" min="1" />
+                      <input type="number" class="form-control form-control-sm" id="numMaxDelay" value="1" min="0" />
                     </div>
                   </div>
                   <div class="row g-2 mb-3">
                     <div class="col-6">
                       <label class="form-label small text-muted mb-1">Sau mỗi (SĐT):</label>
-                      <input type="number" class="form-control form-control-sm" id="numBatchSize" value="15" min="1" />
+                      <input type="number" class="form-control form-control-sm" id="numBatchSize" value="100" min="1" />
                     </div>
                     <div class="col-6">
                       <label class="form-label small text-muted mb-1">Tạm nghỉ (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numBatchPause" value="120" min="3" />
+                      <input type="number" class="form-control form-control-sm" id="numBatchPause" value="0" min="0" />
                     </div>
                   </div>
 
@@ -654,7 +720,7 @@
                   <!-- Render động các nick -->
                 </select>
               </div>
-              <div class="col-md-4 text-md-end">
+              <div class="col-md-4 text-md-end d-flex align-items-center justify-content-md-end">
                 <span class="badge bg-success py-2 px-3 fw-bold" id="repliesCountHeaderBadge">
                   0 khách đã phản hồi
                 </span>
@@ -688,6 +754,90 @@
           </div>
         </div>
 
+        <!-- ==================== PANEL 7: ĐỒNG BỘ HÓA ĐA MÁY (P2P LAN SYNC) ==================== -->
+        <div class="card shadow-sm mb-3 panel-card" id="panelSync" data-panel="sync">
+          <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <h6 class="m-0 fw-bold text-dark d-flex align-items-center gap-2">
+                <i class="bi bi-diagram-3-fill text-info"></i>
+                <span>7. Đồng Bộ Hóa Đa Máy & Tự Động Gộp Bản Mới Nhất (P2P LAN Sync)</span>
+              </h6>
+              <small class="text-muted">Tự động kết nối và đồng bộ hai chiều giữa các máy cùng mở tool trong mạng. Bên nào có dữ liệu mới hơn sẽ tự động gộp!</small>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-primary btn-sm fw-semibold d-flex align-items-center gap-1 shadow-sm" id="btnTriggerSyncNow" type="button">
+                <i class="bi bi-arrow-repeat"></i>
+                <span>⚡ Đồng Bộ Ngay</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card-body">
+            <!-- Thông tin máy này -->
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <div class="border rounded-3 p-3 bg-light h-100">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-bold text-dark">🖥️ Thông tin máy này:</span>
+                    <span class="badge bg-success-subtle text-success border border-success-subtle" id="badgeLocalSyncStatus">🟢 Đang phát tín hiệu P2P</span>
+                  </div>
+                  <div class="small mb-1">
+                    <span class="text-muted">Tên máy:</span> <strong id="lblSyncLocalHostname">Đang tải...</strong>
+                  </div>
+                  <div class="small mb-1">
+                    <span class="text-muted">Địa chỉ IP nội bộ:</span> <code class="fw-bold text-primary fs-6" id="lblSyncLocalIp">Đang nhận diện...</code>
+                  </div>
+                  <small class="text-muted d-block mt-2" style="font-size: 11px;">
+                    💡 Máy tính khác mở tool cùng mạng Wi-Fi/LAN sẽ tự động tìm thấy máy này và đồng bộ không cần cấu hình!
+                  </small>
+                </div>
+              </div>
+
+              <!-- Thêm kết nối thủ công nếu khác mạng/VPN -->
+              <div class="col-md-6">
+                <div class="border rounded-3 p-3 bg-light h-100">
+                  <span class="small fw-bold text-dark d-block mb-2">🔗 Kết nối thủ công tới máy khác (nếu cần):</span>
+                  <div class="input-group input-group-sm mb-2">
+                    <input type="text" class="form-control" id="txtManualPeerIp" placeholder="Nhập IP máy kia (VD: 192.168.1.50 hoặc 10.0.0.5)..." />
+                    <button class="btn btn-info fw-semibold text-white" id="btnAddManualPeer" type="button">+ Kết nối</button>
+                  </div>
+                  <small class="text-muted d-block" style="font-size: 11px;">
+                    Dùng khi 2 máy ở 2 mạng LAN khác nhau nhưng thông qua VPN hoặc IP tĩnh.
+                  </small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Danh sách các máy đã kết nối trong mạng -->
+            <div class="border rounded-3 overflow-hidden">
+              <div class="bg-light p-2 border-bottom fw-bold small text-dark d-flex align-items-center justify-content-between">
+                <span>👥 Danh Sách Các Máy Đang Kết Nối Trong Mạng LAN:</span>
+                <span class="badge bg-primary" id="lblPeersConnectedCount">0 máy</span>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-hover table-sm align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Tên Máy</th>
+                      <th>Địa Chỉ IP & Cổng</th>
+                      <th>Trạng Thái</th>
+                      <th>Lần Gặp Cuối</th>
+                      <th class="text-end">Hành Động</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tblSyncPeersBody">
+                    <tr>
+                      <td colspan="5" class="text-center py-4 text-muted small">
+                        Chưa phát hiện máy nào khác trong mạng. Khi có người mở tool trên máy khác, máy đó sẽ tự động xuất hiện tại đây!
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
   </div>
@@ -715,8 +865,12 @@
         </div>
 
         <!-- Màn hình Live Screenshot Zalo -->
-        <div class="text-center p-2 bg-white rounded-3 border overflow-auto" style="max-height: 520px;">
-          <img id="liveZaloImage" src="" alt="Màn hình Zalo Web" style="max-width: 100%; height: auto; cursor: crosshair;" title="Click vào màn hình để tương tác trực tiếp với Zalo" />
+        <div class="text-center p-2 bg-white rounded-3 border overflow-auto position-relative" style="min-height: 420px; max-height: 540px;">
+          <div id="liveZaloImageSpinner" class="position-absolute top-50 start-50 translate-middle text-muted small d-flex flex-column align-items-center gap-2">
+            <div class="spinner-border text-primary" role="status"></div>
+            <span class="fw-semibold">Đang kết nối khung hình xem ngầm Zalo siêu tốc...</span>
+          </div>
+          <img id="liveZaloImage" src="" alt="Màn hình Zalo Web" style="max-width: 100%; height: auto; cursor: crosshair; display: none;" title="Click vào màn hình để tương tác trực tiếp với Zalo" />
         </div>
         <small class="text-muted d-block text-center mt-2" style="font-size: 11.5px;">
           💡 Mẹo: Bạn có thể click chuột trực tiếp vào ảnh trên nếu Zalo hiện nút "Lấy mã QR mới" hoặc cần chọn lại tài khoản.
