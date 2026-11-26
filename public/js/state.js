@@ -1,0 +1,31 @@
+export const appState = {
+  user: null,
+  currentPanel: localStorage.getItem('tgz_v2_panel') || 'overview',
+  theme: localStorage.getItem('tgz_v2_theme') || 'light',
+  lastEventId: 0,
+  settings: {},
+  accounts: [],
+  contactsPage: {
+    items: [],
+    total: 0,
+    limit: 25,
+    offset: 0,
+    status: 'ALL',
+    consent: '',
+    search: ''
+  },
+  stats: {},
+  consentStats: {},
+  consentsPage: { items: [], total: 0, status: 'ALL', search: '' },
+  templates: [],
+  attachments: [],
+  campaigns: [],
+  tasksPage: { items: [], total: 0, status: 'ALL' },
+  conversations: { items: [], total: 0, activeId: null },
+  devices: [],
+  syncInfo: {},
+  conflicts: [],
+  backups: [],
+  auditLogs: [],
+  health: null
+};

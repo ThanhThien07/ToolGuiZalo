@@ -1,897 +1,440 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="vi">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ToolGuiZalo Pro Automation - Tự Động Gửi Tin Nhắn Zalo</title>
-  <!-- Bootstrap 5.3.3 & Bootstrap Icons 1.11.3 -->
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
-  <!-- Chart.js 4.4.7 for Sơ Đồ Tròn Báo Cáo -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <!-- Custom Styling -->
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body class="bg-slate-50">
-
-  <div class="d-flex vh-100 overflow-hidden" id="appLayout">
-    <!-- ==================== PANEL DỌC BÊN TRÁI (SIDEBAR) ==================== -->
-    <aside class="sidebar-wrapper d-flex flex-column flex-shrink-0 bg-white border-end shadow-sm" style="width: 275px; z-index: 100;">
-      <!-- Brand Logo -->
-      <div class="p-3 border-bottom d-flex align-items-center gap-2">
-        <div class="brand-logo text-white fw-bold d-flex align-items-center justify-content-center rounded-3 shadow-sm" style="width: 42px; height: 42px; background: linear-gradient(135deg, #0068ff, #00a2ff); font-size: 20px;">
-          Z
-        </div>
-        <div>
-          <h6 class="m-0 fw-bold text-dark" style="letter-spacing: -0.3px;">ToolGuiZalo Pro</h6>
-          <small class="text-muted" style="font-size: 11px;">Tự Động Hóa Tin Nhắn Zalo</small>
-        </div>
-      </div>
-
-      <!-- Vertical Sidebar Menu -->
-      <div class="sidebar-nav p-2 flex-grow-1 overflow-y-auto">
-        <div class="nav flex-column gap-1" id="sidebarMenu">
-          <!-- TỔNG QUAN BÁO CÁO (SƠ ĐỒ TRÒN) THAY CHO TẤT CẢ MỤC THEO YÊU CẦU -->
-          <button class="nav-link active d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold" data-panel="overview" type="button">
-            <i class="bi bi-pie-chart-fill text-primary fs-5"></i>
-            <span class="flex-grow-1">📊 Tổng Quan Báo Cáo</span>
-          </button>
-
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="accounts" type="button">
-            <i class="bi bi-people-fill text-primary fs-5"></i>
-            <span class="flex-grow-1">1. Tài Khoản Zalo</span>
-            <span class="badge bg-secondary rounded-pill" id="badgeAccountsCount">2 nick</span>
-          </button>
-
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="schedule" type="button">
-            <i class="bi bi-alarm-fill text-warning fs-5"></i>
-            <span class="flex-grow-1">2. Lịch & Hẹn Giờ</span>
-            <span class="badge bg-secondary rounded-pill" id="badgeScheduleState">Tắt</span>
-          </button>
-
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="import" type="button">
-            <i class="bi bi-cloud-arrow-up-fill text-info fs-5"></i>
-            <span class="flex-grow-1">3. Nạp Danh Sách SĐT</span>
-            <span class="badge bg-secondary rounded-pill" id="badgeContactsTotal">0</span>
-          </button>
-
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="message" type="button">
-            <i class="bi bi-chat-text-fill text-success fs-5"></i>
-            <span class="flex-grow-1">4. Soạn Tin & Tốc Độ</span>
-            <span class="badge bg-secondary rounded-pill" id="badgeImagesTotal">0 ảnh</span>
-          </button>
-
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="table" type="button">
-            <i class="bi bi-table text-primary fs-5"></i>
-            <span class="flex-grow-1">5. Báo Cáo & Danh Sách</span>
-            <span class="badge bg-primary rounded-pill" id="badgeTablePending">0 chờ</span>
-          </button>
-
-          <!-- TRANG RIÊNG HIỂN THỊ CÁC TÀI KHOẢN ĐÃ PHẢN HỒI VÀ Ở ZALO NÀO THEO YÊU CẦU -->
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="replies" type="button">
-            <i class="bi bi-chat-dots-fill text-success fs-5"></i>
-            <span class="flex-grow-1">6. Khách Đã Phản Hồi</span>
-            <span class="badge bg-success rounded-pill" id="badgeRepliesCount">0 rep</span>
-          </button>
-
-          <!-- TÍNH NĂNG ĐỒNG BỘ HÓA ĐA MÁY (P2P LAN SYNC) THEO YÊU CẦU -->
-          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn py-2 px-3 fw-semibold text-secondary" data-panel="sync" type="button">
-            <i class="bi bi-diagram-3-fill text-info fs-5"></i>
-            <span class="flex-grow-1">7. Đồng Bộ Đa Máy</span>
-            <span class="badge bg-info rounded-pill" id="badgeSyncPeers">0 máy</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Sidebar Footer (Nick đang chọn gửi & Nút quét QR nhanh) -->
-      <div class="p-3 border-top bg-light">
-        <div class="d-flex align-items-center justify-content-between mb-1">
-          <small class="text-muted fw-semibold" style="font-size: 11px;">NICK GỬI HIỆN TẠI</small>
-          <span class="dot dot-green" id="sidebarDot"></span>
-        </div>
-        <div class="fw-bold text-truncate text-dark small mb-2" id="sidebarActiveAccName">Tài khoản Zalo #1</div>
-        <button class="btn btn-outline-primary btn-sm w-100 fw-semibold d-flex align-items-center justify-content-center gap-1 py-1" id="btnOpenBrowser" type="button" title="Mở Form quét mã QR hoặc điều khiển màn hình Zalo chạy ngầm">
-          <i class="bi bi-qr-code-scan"></i>
-          <span>Mở Zalo Quét QR</span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- ==================== KHU VỰC NỘI DUNG CHÍNH (BÊN PHẢI) ==================== -->
-    <div class="d-flex flex-column flex-grow-1 overflow-hidden">
-      <!-- TOPBAR HEADER GỌN GÀNG: CHỈ CẦN XUẤT BÁO CÁO VÀ CHẠY BẮT ĐẦU GỬI -->
-      <header class="navbar navbar-expand bg-white border-bottom px-3 justify-content-between flex-shrink-0 shadow-sm" style="height: 62px; z-index: 90;">
-        <!-- Left: Status pill & campaign badge -->
-        <div class="d-flex align-items-center gap-2 overflow-hidden">
-          <div class="status-pill badge bg-light text-dark border d-flex align-items-center gap-2 py-2 px-3 fw-semibold" id="browserStatusBadge" style="font-size: 12.5px;">
-            <span class="dot dot-gray" id="browserDot"></span>
-            <span id="browserStatusText" class="text-truncate" style="max-width: 320px;">Trình duyệt Zalo: Đang đóng</span>
-          </div>
-          <span class="badge bg-secondary px-2 py-2 fw-bold" id="campaignStateBadge">SẴN SÀNG</span>
-          <button class="btn btn-outline-info btn-sm fw-semibold d-flex align-items-center gap-1 py-1 px-2 rounded-pill shadow-sm" id="btnSyncLANHeader" type="button" title="Đồng bộ hóa đa máy theo thời gian thực (P2P LAN Sync)">
-            <i class="bi bi-broadcast text-info"></i>
-            <span id="lblSyncPeersCount">P2P: 0 máy</span>
-          </button>
-          <span class="badge bg-warning text-dark border hidden py-2 px-3 fw-semibold" id="countdownBox">
-            ⏳ Nghỉ giữa 2 SĐT: <strong id="countdownValue">0</strong>s
-          </span>
-          <span class="badge bg-info text-dark border hidden py-2 px-3 fw-semibold" id="scheduleCountdownBox">
-            ⏰ Hẹn giờ chạy sau: <strong id="scheduleCountdownValue">0</strong>s
-          </span>
-        </div>
-
-        <!-- Right: CHỈ 2 NÚT DUY NHẤT: XUẤT BÁO CÁO VÀ BẮT ĐẦU GỬI THEO YÊU CẦU -->
-        <div class="d-flex align-items-center gap-2 flex-shrink-0">
-          <a href="/api/reports/export-excel" class="btn btn-success fw-semibold px-3 d-flex align-items-center gap-2 shadow-sm" id="btnExportExcel" title="Xuất toàn bộ kết quả phân loại ra file Excel (.xlsx)">
-            <i class="bi bi-file-earmark-excel-fill fs-6"></i>
-            <span>Xuất Báo Cáo (.xlsx)</span>
-          </a>
-
-          <button class="btn btn-primary fw-semibold px-3 d-flex align-items-center gap-2 shadow-sm" id="btnStartCampaign" type="button">
-            <i class="bi bi-play-fill fs-5"></i>
-            <span>Bắt đầu gửi</span>
-          </button>
-
-          <button class="btn btn-warning fw-semibold px-3 hidden d-flex align-items-center gap-2 shadow-sm" id="btnPauseCampaign" type="button">
-            <i class="bi bi-pause-fill fs-5"></i>
-            <span>Tạm dừng</span>
-          </button>
-        </div>
-      </header>
-
-      <!-- SCROLLABLE BODY CONTENT -->
-      <main class="main-body overflow-y-auto p-3 flex-grow-1" id="mainContainer">
-
-        <!-- ==================== PANEL OVERVIEW: TỔNG QUAN BÁO CÁO & SƠ ĐỒ TRÒN ==================== -->
-        <div class="panel-card" id="panelOverview" data-panel="overview">
-          <!-- 5 Thẻ Thống Kê Tổng Quan (KPI Cards) -->
-          <section class="row g-2 mb-3 stats-grid">
-            <div class="col-6 col-md">
-              <div class="card stat-card stat-total shadow-sm h-100 p-2 cursor-pointer" data-filter="ALL" title="Bấm để xem tất cả số điện thoại">
-                <div class="small text-muted fw-semibold">Tổng SĐT</div>
-                <div class="fs-4 fw-bold text-primary my-1" id="statTotal">0</div>
-                <div class="text-muted" style="font-size: 11px;">Nhấn để xem tất cả</div>
-              </div>
-            </div>
-            <div class="col-6 col-md">
-              <div class="card stat-card stat-success shadow-sm h-100 p-2 cursor-pointer" data-filter="THANH_CONG" title="Bấm để xem danh sách gửi thành công">
-                <div class="small text-muted fw-semibold">Đã gửi thành công</div>
-                <div class="fs-4 fw-bold text-success my-1" id="statSuccess">0</div>
-                <div class="text-muted" style="font-size: 11px;">Đã nhận tin / ảnh</div>
-              </div>
-            </div>
-            <div class="col-6 col-md">
-              <div class="card stat-card stat-blocked shadow-sm h-100 p-2 cursor-pointer" data-filter="CHAN_NGUOI_LA" title="Bấm để xem danh sách bị chặn người lạ">
-                <div class="small text-muted fw-semibold">Bị chặn người lạ</div>
-                <div class="fs-4 fw-bold text-warning my-1" id="statBlocked">0</div>
-                <div class="text-muted" style="font-size: 11px;">Chặn tin từ người lạ</div>
-              </div>
-            </div>
-            <div class="col-6 col-md">
-              <div class="card stat-card stat-unregistered shadow-sm h-100 p-2 cursor-pointer" data-filter="KHONG_DANG_KY" title="Bấm để xem SĐT chưa đăng ký Zalo">
-                <div class="small text-muted fw-semibold">Chưa ĐK / Ẩn SĐT</div>
-                <div class="fs-4 fw-bold text-danger my-1" id="statNotRegistered">0</div>
-                <div class="text-muted" style="font-size: 11px;">Chưa ĐK Zalo</div>
-              </div>
-            </div>
-            <div class="col-12 col-md">
-              <div class="card stat-card stat-pending shadow-sm h-100 p-2 cursor-pointer" data-filter="PENDING" title="Bấm để xem SĐT đang chờ xử lý">
-                <div class="small text-muted fw-semibold">Đang chờ xử lý</div>
-                <div class="fs-4 fw-bold text-info my-1" id="statPending">0</div>
-                <div class="text-muted" style="font-size: 11px;">Sẵn sàng để gửi</div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Sơ Đồ Tròn Thống Kê & Bảng Hiệu Suất Tài Khoản -->
-          <div class="row g-3">
-            <!-- Cột trái: Sơ đồ tròn phân loại trạng thái -->
-            <div class="col-lg-6">
-              <div class="card shadow-sm h-100">
-                <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between">
-                  <h6 class="m-0 fw-bold text-dark">
-                    <i class="bi bi-pie-chart-fill text-primary me-2"></i>Sơ Đồ Phân Loại Trạng Thái SĐT
-                  </h6>
-                  <span class="badge bg-light text-muted border">Tự động cập nhật</span>
-                </div>
-                <div class="card-body d-flex flex-column align-items-center justify-content-center p-4">
-                  <div style="position: relative; width: 100%; max-width: 320px; height: 260px;">
-                    <canvas id="chartStatusPie"></canvas>
-                  </div>
-                  <!-- Chú thích chi tiết dưới biểu đồ -->
-                  <div class="d-flex flex-wrap justify-content-center gap-3 mt-3 small" id="chartLegendList">
-                    <div class="d-flex align-items-center gap-1">
-                      <span class="dot" style="background:#10b981;"></span>
-                      <span>Thành công: <strong id="legendSuccess">0</strong></span>
-                    </div>
-                    <div class="d-flex align-items-center gap-1">
-                      <span class="dot" style="background:#f59e0b;"></span>
-                      <span>Chặn người lạ: <strong id="legendBlocked">0</strong></span>
-                    </div>
-                    <div class="d-flex align-items-center gap-1">
-                      <span class="dot" style="background:#ef4444;"></span>
-                      <span>Chưa ĐK Zalo: <strong id="legendNotReg">0</strong></span>
-                    </div>
-                    <div class="d-flex align-items-center gap-1">
-                      <span class="dot" style="background:#0ea5e9;"></span>
-                      <span>Đang chờ: <strong id="legendPending">0</strong></span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Cột phải: Thống kê chi tiết tài khoản & khách phản hồi -->
-            <div class="col-lg-6">
-              <div class="card shadow-sm h-100">
-                <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between">
-                  <h6 class="m-0 fw-bold text-dark">
-                    <i class="bi bi-bar-chart-line-fill text-success me-2"></i>Tiến Độ & Phân Bổ Theo Tài Khoản
-                  </h6>
-                  <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="switchPanel('table')" type="button">Xem bảng ➔</button>
-                </div>
-                <div class="card-body p-3">
-                  <!-- Tỷ lệ thành công chung -->
-                  <div class="mb-3 p-3 bg-light rounded-3 border">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                      <span class="small fw-bold text-dark">Tỷ Lệ Gửi Thành Công</span>
-                      <span class="fw-bold text-success" id="overviewSuccessRate">0%</span>
-                    </div>
-                    <div class="progress" style="height: 10px;">
-                      <div class="progress-bar bg-success" id="overviewProgressBar" role="progressbar" style="width: 0%"></div>
-                    </div>
-                  </div>
-
-                  <!-- Danh sách tài khoản và số tin đã gửi -->
-                  <h6 class="small fw-bold text-muted text-uppercase mb-2">Số tin đã gửi qua từng Nick Zalo:</h6>
-                  <div class="d-flex flex-column gap-2 mb-3" id="overviewAccountsProgress">
-                    <!-- Render động danh sách tài khoản -->
-                  </div>
-
-                  <!-- Khách phản hồi widget -->
-                  <div class="alert alert-success border p-3 mb-0 d-flex align-items-center justify-content-between rounded-3">
-                    <div>
-                      <div class="fw-bold text-success d-flex align-items-center gap-1">
-                        <i class="bi bi-chat-dots-fill"></i>
-                        <span>Khách Hàng Đã Phản Hồi: <span id="overviewRepliedCount">0</span> người</span>
-                      </div>
-                      <small class="text-muted">Xem nội dung khách nhắn lại và nick Zalo nhận phản hồi</small>
-                    </div>
-                    <button class="btn btn-success btn-sm fw-semibold" onclick="switchPanel('replies')" type="button">
-                      Xem chi tiết ➔
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ToolGuiZalo Pro V2 – Nền tảng Quản lý Khách hàng & Tác vụ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="d-flex vh-100 overflow-hidden">
+      <!-- SIDEBAR -->
+      <aside class="sidebar-wrapper d-flex flex-column flex-shrink-0 bg-white border-end" style="width: 265px;">
+        <div class="p-3 border-bottom d-flex align-items-center gap-2">
+          <div class="text-white fw-bold d-flex align-items-center justify-content-center rounded-3" style="width:38px;height:38px;background:linear-gradient(135deg,#0068ff,#0284c7);font-size:18px;">Z</div>
+          <div>
+            <h6 class="m-0 fw-bold">ToolGuiZalo Pro V2</h6>
+            <small class="text-muted" style="font-size:11px;">SQLite WAL • Consent • RBAC</small>
           </div>
         </div>
-
-        <!-- ==================== PANEL 1: QUẢN LÝ TÀI KHOẢN ZALO ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelAccounts" data-panel="accounts">
-          <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h6 class="m-0 fw-bold text-dark">
-              <i class="bi bi-people-fill text-primary me-2"></i>1. Quản Lý Tài Khoản Zalo & Chuyển Nick Tự Động
-            </h6>
-            <div class="d-flex align-items-center gap-2">
-              <div class="input-group input-group-sm" style="width: 260px;">
-                <input type="text" class="form-control" id="txtNewAccountName" placeholder="Tên nick mới (VD: Zalo KD)..." />
-                <button class="btn btn-primary fw-semibold" id="btnAddAccount" type="button">+ Thêm nick</button>
-              </div>
-              <button class="btn btn-outline-secondary btn-sm fw-semibold" id="btnLaunchAllAccounts" type="button" title="Mở ngầm tất cả tài khoản để sẵn sàng gửi">
-                ⚡ Bật tất cả nick
-              </button>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <!-- Danh sách các tài khoản Zalo -->
-            <div class="accounts-list mb-3" id="accountsListContainer">
-              <!-- Render động -->
-            </div>
-
-            <!-- CHẾ ĐỘ ĐIỀU PHỐI TÁC VỤ (TASK ORCHESTRATOR & WORKER POOL) -->
-            <div class="card border rounded-3 p-3 bg-light mb-0">
-              <div class="d-flex align-items-center justify-content-between mb-2">
-                <span class="fw-bold text-dark d-flex align-items-center gap-2">
-                  <i class="bi bi-cpu-fill text-primary"></i>
-                  <span>Chế độ điều phối tác vụ (Task Orchestrator):</span>
-                </span>
-                <span class="badge bg-primary px-2 py-1" id="badgeCurrentSendMode">Luân phiên (An toàn)</span>
-              </div>
-
-              <div class="row g-2">
-                <!-- Chế độ 1: Luân phiên (Round-Robin) -->
-                <div class="col-md-6">
-                  <label class="p-3 border rounded-3 bg-white h-100 d-flex align-items-start gap-2 cursor-pointer shadow-sm mode-card" for="optModeRoundRobin">
-                    <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="radSendMode" id="optModeRoundRobin" value="ROUND_ROBIN" checked>
-                    <div>
-                      <div class="fw-bold text-dark">🔄 Gửi luân phiên lần lượt từng nick</div>
-                      <small class="text-muted d-block mt-1">
-                        Nick 1 gửi xong hạn mức (hoặc chạm giới hạn) sẽ tự động chuyển sang Nick 2. An toàn tuyệt đối cho tài khoản.
-                      </small>
-                    </div>
-                  </label>
-                </div>
-
-                <!-- Chế độ 2: Song song Đa luồng (Parallel Workers) -->
-                <div class="col-md-6">
-                  <label class="p-3 border rounded-3 bg-white h-100 d-flex align-items-start gap-2 cursor-pointer shadow-sm mode-card" for="optModeParallel">
-                    <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="radSendMode" id="optModeParallel" value="PARALLEL">
-                    <div>
-                      <div class="fw-bold text-primary">⚡ Gửi song song đa luồng (Worker Pool)</div>
-                      <small class="text-muted d-block mt-1">
-                        Tất cả nick Zalo đã đăng nhập cùng bốc việc từ hàng đợi Task Queue và gửi đồng thời. Nhân đôi/nhân ba tốc độ gửi.
-                      </small>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              <!-- Checkbox ẩn để duy trì tương thích ngược -->
-              <input type="checkbox" id="chkAutoRotateAccounts" class="d-none" checked>
-            </div>
-          </div>
+        <div class="p-2 flex-grow-1 overflow-y-auto d-flex flex-column gap-1">
+          <button class="nav-link active d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="overview" type="button"><i class="bi bi-pie-chart-fill text-primary"></i><span class="flex-grow-1">Tổng quan</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="accounts" type="button"><i class="bi bi-people-fill text-primary"></i><span class="flex-grow-1">Tài khoản & Kênh</span><span class="badge bg-secondary rounded-pill" id="badgeAccountsCount">0</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="contacts" type="button"><i class="bi bi-person-lines-fill text-info"></i><span class="flex-grow-1">Khách hàng & Nhập</span><span class="badge bg-secondary rounded-pill" id="badgeContactsTotal">0</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="consents" type="button"><i class="bi bi-shield-check text-success"></i><span class="flex-grow-1">Consent & Opt-out</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="templates" type="button"><i class="bi bi-file-earmark-text text-success"></i><span class="flex-grow-1">Mẫu tin & Ảnh</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="campaigns" type="button"><i class="bi bi-megaphone-fill text-primary"></i><span class="flex-grow-1">Chiến dịch</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="tasks" type="button"><i class="bi bi-list-task text-warning"></i><span class="flex-grow-1">Task & Hàng chờ Review</span><span class="badge bg-warning text-dark rounded-pill" id="badgeReviewTasks">0</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="inbox" type="button"><i class="bi bi-chat-dots-fill text-success"></i><span class="flex-grow-1">Hộp thư Inbox</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="devices" type="button"><i class="bi bi-diagram-3-fill text-info"></i><span class="flex-grow-1">Thiết bị & Delta Sync</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="monitor" type="button"><i class="bi bi-activity text-danger"></i><span class="flex-grow-1">Giám sát & Audit</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="backups" type="button"><i class="bi bi-database-lock text-primary"></i><span class="flex-grow-1">Sao lưu & Phục hồi</span></button>
+          <button class="nav-link d-flex align-items-center gap-2 text-start sidebar-nav-btn" data-panel="settings" type="button"><i class="bi bi-gear-fill text-secondary"></i><span class="flex-grow-1">Cài đặt & Phân quyền</span></button>
         </div>
-
-        <!-- ==================== PANEL 2: LÊN LỊCH GỬI TIN NHẮN TỰ ĐỘNG ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelSchedule" data-panel="schedule">
-          <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <div class="d-flex align-items-center gap-2">
-              <h6 class="m-0 fw-bold text-dark">
-                <i class="bi bi-alarm-fill text-warning me-2"></i>2. Lên Lịch Gửi Tin Nhắn Tự Động
-              </h6>
-              <span class="badge bg-secondary" id="scheduleStatePill">⚪ ĐANG TẮT LỊCH</span>
-            </div>
-            <div class="d-flex align-items-center gap-1">
-              <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-2" data-schedule-min="5">+5p</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-2" data-schedule-min="15">+15p</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-2" data-schedule-min="30">+30p</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-2" data-schedule-min="60">+1h</button>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <div class="row g-3 mb-3">
-              <!-- Khối 1: Bật/Tắt hẹn giờ -->
-              <div class="col-md-6">
-                <div class="border rounded-3 p-3 bg-light h-100" id="scheduleStartBlock">
-                  <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" id="chkScheduleEnabled" role="switch" style="width: 38px; height: 20px;">
-                    <label class="form-check-label fw-bold text-dark" for="chkScheduleEnabled">Bật hẹn giờ tự động chạy chiến dịch</label>
-                  </div>
-                  <label class="form-label small text-muted mb-1">Thời điểm tự động chạy:</label>
-                  <input type="datetime-local" class="form-control form-control-sm" id="dtScheduleStartAt" />
-                  <small class="text-muted d-block mt-2">Hệ thống sẽ đếm ngược và tự động bấm gửi khi tới giờ.</small>
-                </div>
-              </div>
-
-              <!-- Khối 2: Khung giờ hoạt động -->
-              <div class="col-md-6">
-                <div class="border rounded-3 p-3 bg-light h-100" id="activeHoursBlock">
-                  <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" id="chkActiveHoursEnabled" role="switch" style="width: 38px; height: 20px;">
-                    <label class="form-check-label fw-bold text-dark" for="chkActiveHoursEnabled">Bật giới hạn khung giờ gửi trong ngày</label>
-                  </div>
-                  <div class="row g-2">
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">Chỉ gửi từ:</label>
-                      <input type="time" class="form-control form-control-sm" id="tmActiveStart" value="08:00" />
-                    </div>
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">đến:</label>
-                      <input type="time" class="form-control form-control-sm" id="tmActiveEnd" value="21:30" />
-                    </div>
-                  </div>
-                  <small class="text-muted d-block mt-2">Ngoài khung giờ trên, hệ thống tự động tạm dừng gửi.</small>
-                </div>
-              </div>
-            </div>
-
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 pt-2 border-top">
-              <span class="text-muted small">Bật hoặc tắt lịch hẹn bất cứ lúc nào.</span>
-              <button type="button" class="btn btn-primary btn-sm fw-semibold px-3" id="btnApplySchedule">
-                💾 Lưu / Cập nhật lịch
-              </button>
-            </div>
-          </div>
+        <div class="p-2 border-top d-flex align-items-center justify-content-between gap-2">
+          <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="btnToggleTheme" type="button">🌙 Tối</button>
+          <button class="btn btn-outline-danger btn-sm" id="btnLogout" type="button" title="Đăng xuất">Thoát</button>
         </div>
+      </aside>
 
-        <!-- ==================== PANEL 3: NẠP DANH SÁCH SĐT ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelImport" data-panel="import">
-          <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between">
-            <h6 class="m-0 fw-bold text-dark">
-              <i class="bi bi-cloud-arrow-up-fill text-info me-2"></i>3. Nạp Danh Sách SĐT & Thông Tin Hàng Loạt
-            </h6>
-            <ul class="nav nav-pills" id="importTabs">
-              <li class="nav-item">
-                <button class="nav-link active py-1 px-3 tab-btn" data-tab="tabText" type="button">Nhập / Dán nhanh</button>
-              </li>
-              <li class="nav-item">
-                <button class="nav-link py-1 px-3 tab-btn" data-tab="tabExcel" type="button">Upload File Excel</button>
-              </li>
-            </ul>
+      <!-- MAIN -->
+      <div class="d-flex flex-column flex-grow-1 overflow-hidden">
+        <header class="navbar bg-white border-bottom px-3 justify-content-between flex-shrink-0" style="height: 58px;">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary-subtle text-primary border" id="topbarUserLabel">Chưa đăng nhập</span>
+            <span class="badge bg-light text-dark border">Local 127.0.0.1 • SQLite WAL</span>
           </div>
-
-          <div class="card-body">
-            <!-- Tab Dán Text -->
-            <div class="tab-pane active" id="tabText">
-              <div class="d-flex align-items-center justify-content-between mb-2">
-                <small class="text-muted">Định dạng: <code>SĐT | Tên | Thông tin | Nội dung riêng (tùy chọn)</code></small>
-                <button class="btn btn-link btn-sm text-decoration-none p-0" id="btnFillSampleText" type="button">+ Chèn mẫu thử</button>
-              </div>
-              <textarea id="txtBulkContacts" rows="7" class="form-control font-monospace mb-2" placeholder="0912345678 | Nguyễn Văn An | Đơn hàng #DH101 - Giao ngày 15/11&#10;0987654323 | Trần Thị Bình | Mã giảm giá VIP50&#10;0905112230 | Lê Hoàng Nam | Lịch hẹn tư vấn 14h00 | Chào anh {ten}, hẹn gặp anh nhé!"></textarea>
-              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-3">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="chkDeduplicateText" checked>
-                    <label class="form-check-label small" for="chkDeduplicateText">Lọc bỏ SĐT trùng</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="chkReplaceText">
-                    <label class="form-check-label small" for="chkReplaceText">Xóa danh sách cũ trước khi nạp</label>
-                  </div>
-                </div>
-                <button class="btn btn-primary btn-sm fw-semibold px-3" id="btnImportText" type="button">
-                  📥 Nạp vào danh sách
-                </button>
-              </div>
-            </div>
-
-            <!-- Tab Upload Excel -->
-            <div class="tab-pane d-none" id="tabExcel">
-              <div class="border rounded-3 p-3 bg-light">
-                <label class="form-label fw-bold small text-dark mb-1">Chọn file Excel (.xlsx, .xls) hoặc CSV:</label>
-                <input type="file" class="form-control form-control-sm mb-3" id="fileExcelInput" accept=".xlsx,.xls,.csv" />
-                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                  <div class="d-flex align-items-center gap-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="chkDeduplicateExcel" checked>
-                      <label class="form-check-label small" for="chkDeduplicateExcel">Lọc bỏ SĐT trùng</label>
-                    </div>
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="chkReplaceExcel">
-                      <label class="form-check-label small" for="chkReplaceExcel">Xóa danh sách cũ</label>
-                    </div>
-                  </div>
-                  <div class="d-flex align-items-center gap-2">
-                    <a href="/api/sample-excel" class="btn btn-outline-secondary btn-sm">Tải file mẫu Excel</a>
-                    <button class="btn btn-primary btn-sm fw-semibold" id="btnUploadExcel" type="button">Upload & Nạp</button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div class="d-flex align-items-center gap-2">
+            <a href="/api/v2/reports/export-excel" class="btn btn-success btn-sm fw-semibold">Xuất Báo Cáo (.xlsx)</a>
+            <a href="/api/v2/reports/export-replies-excel" class="btn btn-outline-success btn-sm fw-semibold">Xuất Inbox (.xlsx)</a>
           </div>
-        </div>
+        </header>
 
-        <!-- ==================== PANEL 4: SOẠN TIN & TỐC ĐỘ ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelMessage" data-panel="message">
-          <div class="card-header bg-white py-3">
-            <h6 class="m-0 fw-bold text-dark">
-              <i class="bi bi-chat-text-fill text-success me-2"></i>4. Soạn Nội Dung Tin Nhắn & Cấu Hình Tốc Độ
-            </h6>
-          </div>
-
-          <div class="card-body">
+        <main class="main-body overflow-y-auto p-3 flex-grow-1">
+          <!-- OVERVIEW -->
+          <div class="panel-card active-panel" id="panelOverview" data-panel="overview">
+            <section class="row g-2 mb-3">
+              <div class="col-6 col-md"><div class="card stat-card stat-total p-2"><small class="text-muted">Tổng SĐT</small><div class="fs-4 fw-bold text-primary" id="statTotal">0</div></div></div>
+              <div class="col-6 col-md"><div class="card stat-card stat-success p-2"><small class="text-muted">Thành công</small><div class="fs-4 fw-bold text-success" id="statSuccess">0</div></div></div>
+              <div class="col-6 col-md"><div class="card stat-card stat-blocked p-2"><small class="text-muted">Chặn người lạ</small><div class="fs-4 fw-bold text-warning" id="statBlocked">0</div></div></div>
+              <div class="col-6 col-md"><div class="card stat-card stat-unregistered p-2"><small class="text-muted">Chưa ĐK</small><div class="fs-4 fw-bold text-danger" id="statNotRegistered">0</div></div></div>
+              <div class="col-6 col-md"><div class="card stat-card stat-pending p-2"><small class="text-muted">Đang chờ</small><div class="fs-4 fw-bold text-info" id="statPending">0</div></div></div>
+              <div class="col-6 col-md"><div class="card stat-card stat-review p-2"><small class="text-muted">Cần REVIEW</small><div class="fs-4 fw-bold" style="color:#8b5cf6" id="statReview">0</div></div></div>
+            </section>
             <div class="row g-3">
-              <!-- Cột trái: Soạn tin nhắn & Đính kèm ảnh -->
-              <div class="col-lg-7">
-                <div class="d-flex align-items-center justify-content-between mb-1">
-                  <label class="form-label small fw-bold text-dark m-0">Nội dung tin nhắn (Hỗ trợ Spintax & Trộn tên):</label>
-                  <div class="d-flex gap-1">
-                    <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 insert-tag" data-tag="{ten}">+ {ten}</button>
-                    <span class="text-muted">•</span>
-                    <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 insert-tag" data-tag="{thong_tin}">+ {thong_tin}</button>
-                  </div>
-                </div>
-                <textarea id="txtTemplate" rows="5" class="form-control mb-2" placeholder="{Xin chào|Chào|Em chào} {ten},&#10;Mình gửi bạn thông tin: {thong_tin}&#10;Nếu cần hỗ trợ thêm bạn cứ phản hồi lại tin nhắn này nhé!"></textarea>
-
-                <!-- Xem trước Spintax -->
-                <div class="p-2 bg-light rounded-2 border mb-3">
-                  <div class="d-flex align-items-center justify-content-between mb-1">
-                    <small class="text-muted fw-bold" style="font-size: 11px;">XEM TRƯỚC TIN NHẮN THỰC TẾ:</small>
-                    <button class="btn btn-link btn-sm text-decoration-none p-0" id="btnRegeneratePreview" type="button">🔄 Đổi biến thể</button>
-                  </div>
-                  <div class="small text-dark font-monospace" id="previewBox" style="white-space: pre-wrap;"></div>
-                </div>
-
-                <!-- Đính kèm ảnh gửi trực tiếp -->
-                <div class="border rounded-3 p-3 bg-light">
-                  <div class="d-flex align-items-center justify-content-between mb-2">
-                    <label class="form-label fw-bold small text-dark m-0">
-                      🖼 Đính Kèm Hình Ảnh Gửi Trực Tiếp
-                    </label>
-                    <button class="btn btn-outline-danger btn-sm py-0 px-2" id="btnClearImages" type="button">Xóa hết ảnh</button>
-                  </div>
-                  <input type="file" id="fileImageInput" class="form-control form-control-sm mb-2" accept="image/*" multiple />
-                  <div class="d-flex flex-wrap gap-2 mt-2" id="attachedImagesContainer">
-                    <!-- Danh sách ảnh đính kèm -->
-                  </div>
+              <div class="col-lg-6">
+                <div class="card p-3 h-100">
+                  <h6 class="fw-bold mb-3">Phân bố trạng thái khách hàng</h6>
+                  <div style="height:250px;"><canvas id="chartStatusPie"></canvas></div>
                 </div>
               </div>
-
-              <!-- Cột phải: Cấu hình tốc độ gửi -->
-              <div class="col-lg-5">
-                <div class="border rounded-3 p-3 bg-light h-100">
-                  <!-- CHỌN CHẾ ĐỘ TỐC ĐỘ GỬI -->
-                  <div class="speed-preset-box mb-3">
-                    <div class="d-flex align-items-center justify-content-between mb-2">
-                      <span class="fw-bold small text-dark d-flex align-items-center gap-1">
-                        <i class="bi bi-lightning-charge-fill text-primary"></i>
-                        <span>Chế Độ Tốc Độ Gửi</span>
-                      </span>
-                      <span class="speed-status-pill preset-turbo" id="badgeSpeedPresetName">⚡ Siêu Tốc</span>
-                    </div>
-                    <div class="speed-preset-grid" role="group">
-                      <button type="button" class="speed-preset-item preset-turbo active" id="btnPresetTurbo" title="Delay 0-1s, không nghỉ chặng">
-                        <span class="preset-title">⚡ Siêu Tốc</span>
-                        <span class="preset-sub">0 – 1s / tin</span>
-                      </button>
-                      <button type="button" class="speed-preset-item preset-fast" id="btnPresetFast" title="Delay 2-4s, nghỉ 15s sau mỗi 30 SĐT">
-                        <span class="preset-title">🚀 Nhanh</span>
-                        <span class="preset-sub">2 – 4s / tin</span>
-                      </button>
-                      <button type="button" class="speed-preset-item preset-safe" id="btnPresetSafe" title="Delay 12-25s, nghỉ 120s sau mỗi 15 SĐT">
-                        <span class="preset-title">🛡️ An Toàn</span>
-                        <span class="preset-sub">12 – 25s / tin</span>
-                      </button>
-                    </div>
-                    <div class="speed-preset-desc" id="lblSpeedPresetHelp">
-                      Bắn liên tục 0–1s, không nghỉ chặng. Tối ưu khi gửi 5.000 SĐT đa luồng.
-                    </div>
+              <div class="col-lg-6">
+                <div class="card p-3 h-100">
+                  <h6 class="fw-bold mb-3">Tuân thủ quyền nhận tin (Consent)</h6>
+                  <div class="d-flex justify-content-between p-2 border rounded mb-2">
+                    <span>Đã đồng ý nhận tin (OPTED_IN)</span>
+                    <strong class="text-success" id="lblOptedInCount">0</strong>
                   </div>
-
-                  <h6 class="small fw-bold text-dark mb-2">⏱ Chi Tiết Khoảng Nghỉ & An Toàn:</h6>
-                  <div class="row g-2 mb-2">
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">Nghỉ từ (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numMinDelay" value="0" min="0" />
-                    </div>
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">đến (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numMaxDelay" value="1" min="0" />
-                    </div>
+                  <div class="d-flex justify-content-between p-2 border rounded mb-2">
+                    <span>Danh sách từ chối toàn cục (OPTED_OUT)</span>
+                    <strong class="text-danger" id="lblOptedOutCount">0</strong>
                   </div>
-                  <div class="row g-2 mb-3">
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">Sau mỗi (SĐT):</label>
-                      <input type="number" class="form-control form-control-sm" id="numBatchSize" value="100" min="1" />
-                    </div>
-                    <div class="col-6">
-                      <label class="form-label small text-muted mb-1">Tạm nghỉ (giây):</label>
-                      <input type="number" class="form-control form-control-sm" id="numBatchPause" value="0" min="0" />
-                    </div>
-                  </div>
-
-                  <div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="chkFastPasteMode" checked>
-                    <label class="form-check-label small" for="chkFastPasteMode">Dán siêu tốc (Clipboard copy/paste)</label>
-                  </div>
-                  <div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="chkUseCustomFirst" checked>
-                    <label class="form-check-label small" for="chkUseCustomFirst">Ưu tiên nội dung riêng từng SĐT nếu có</label>
-                  </div>
-                  <div class="form-check mb-3">
-                    <input class="form-check-input" type="checkbox" id="chkUsePhoneCache">
-                    <label class="form-check-label small" for="chkUsePhoneCache">Sử dụng bộ nhớ cache SĐT để không tốn lượt tìm</label>
-                  </div>
-                  <div class="form-check mb-0">
-                    <input class="form-check-input" type="checkbox" id="chkAutoAddFriend">
-                    <label class="form-check-label small" for="chkAutoAddFriend">Tự động bấm Kết Bạn khi bị chặn người lạ</label>
-                  </div>
+                  <small class="text-muted">Hệ thống V2 chỉ gửi tin cho khách đã Opt-in, dừng ngay khi gặp giới hạn nền tảng và đưa kết quả bất định vào REVIEW.</small>
                 </div>
               </div>
             </div>
-
-            <div class="d-flex justify-content-end pt-3 mt-3 border-top">
-              <button class="btn btn-primary btn-sm fw-semibold px-4" id="btnSaveSettings" type="button">
-                💾 Lưu Cấu Hình Tin Nhắn
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== PANEL 5: BÁO CÁO & DANH SÁCH SĐT ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelTable" data-panel="table">
-          <div class="card-header bg-white py-3">
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-              <h6 class="m-0 fw-bold text-dark">
-                <i class="bi bi-table text-primary me-2"></i>5. Báo Cáo Phân Loại & Danh Sách SĐT Chi Tiết
-              </h6>
-              <div class="d-flex align-items-center gap-2">
-                <input type="text" class="form-control form-control-sm" id="txtSearchTable" placeholder="🔍 Tìm kiếm SĐT, tên, kết quả..." style="width: 220px;" />
-                <select class="form-select form-select-sm" id="selPageSize" style="width: 100px;">
-                  <option value="15">15 dòng</option>
-                  <option value="25" selected>25 dòng</option>
-                  <option value="50">50 dòng</option>
-                  <option value="all">Tất cả</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Tab Lọc Kết Quả -->
-            <div class="d-flex flex-wrap gap-1" id="filterTabs">
-              <button class="btn btn-sm btn-outline-primary active filter-tab" data-status="ALL" type="button">
-                Tất cả (<span id="tabCountAll">0</span>)
-              </button>
-              <button class="btn btn-sm btn-outline-success filter-tab" data-status="THANH_CONG" type="button">
-                Đã gửi thành công (<span id="tabCountSuccess">0</span>)
-              </button>
-              <button class="btn btn-sm btn-outline-warning filter-tab" data-status="CHAN_NGUOI_LA" type="button">
-                Bị chặn người lạ (<span id="tabCountBlocked">0</span>)
-              </button>
-              <button class="btn btn-sm btn-outline-danger filter-tab" data-status="KHONG_DANG_KY" type="button">
-                Chưa ĐK Zalo (<span id="tabCountUnreg">0</span>)
-              </button>
-              <button class="btn btn-sm btn-outline-info filter-tab" data-status="PENDING" type="button">
-                Đang chờ (<span id="tabCountPending">0</span>)
-              </button>
-              <button class="btn btn-sm btn-outline-secondary filter-tab" data-status="SAI_SO" type="button">
-                Sai số / Lỗi (<span id="tabCountError">0</span>)
-              </button>
-            </div>
           </div>
 
-          <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 480px;">
-              <table class="table table-hover table-striped align-middle mb-0" id="contactsTable">
-                <thead class="table-light sticky-top">
-                  <tr>
-                    <th style="width: 40px;" class="text-center">
-                      <input type="checkbox" class="form-check-input" id="chkSelectAll">
-                    </th>
-                    <th style="width: 50px;">STT</th>
-                    <th style="width: 130px;">Số Điện Thoại</th>
-                    <th style="width: 150px;">Tên Khách Hàng</th>
-                    <th style="width: 150px;">Tên Zalo Tìm Thấy</th>
-                    <th style="width: 150px;">Tài Khoản Gửi</th>
-                    <th style="width: 150px;">Trạng Thái</th>
-                    <th>Chi Tiết / Phản Hồi</th>
-                    <th style="width: 90px;" class="text-center">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody id="contactsTableBody">
-                  <!-- Dữ liệu render động -->
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="card-footer bg-white py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-outline-secondary btn-sm" id="btnDeleteSelected" type="button">Xóa đã chọn</button>
-              <button class="btn btn-outline-secondary btn-sm" id="btnResetSelectedStatus" type="button">Gửi lại đã chọn</button>
-              <button class="btn btn-outline-danger btn-sm" id="btnClearAll" type="button">Xóa hết danh sách</button>
-            </div>
-
-            <!-- Phân Trang -->
-            <div class="d-flex align-items-center gap-2">
-              <span class="small text-muted" id="pageInfo">Trang 1/1</span>
-              <div class="btn-group btn-group-sm" role="group">
-                <button class="btn btn-outline-secondary" id="btnFirstPage" type="button">«</button>
-                <button class="btn btn-outline-secondary" id="btnPrevPage" type="button">‹</button>
-                <button class="btn btn-outline-secondary" id="btnNextPage" type="button">›</button>
-                <button class="btn btn-outline-secondary" id="btnLastPage" type="button">»</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== PANEL 6: KHÁCH HÀNG ĐÃ PHẢN HỒI (MỚI THEO YÊU CẦU) ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelReplies" data-panel="replies">
-          <div class="card-header bg-white py-3">
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div>
-                <h6 class="m-0 fw-bold text-dark d-flex align-items-center gap-2">
-                  <i class="bi bi-chat-dots-fill text-success fs-5"></i>
-                  <span>6. Khách Hàng Đã Phản Hồi Tin Nhắn</span>
-                </h6>
-                <small class="text-muted">Theo dõi và phản hồi ngay các khách hàng đã nhắn lại sau khi nhận tin từ các tài khoản Zalo</small>
-              </div>
-              <div class="d-flex align-items-center gap-2">
-                <button class="btn btn-outline-success btn-sm fw-semibold d-flex align-items-center gap-1" id="btnCheckReplies" type="button" title="Quét tin nhắn mới đến trên các tài khoản Zalo đã đăng nhập">
-                  <i class="bi bi-arrow-repeat"></i>
-                  <span>Quét kiểm tra phản hồi mới</span>
-                </button>
-                <a href="/api/reports/export-replies-excel" class="btn btn-success btn-sm fw-semibold d-flex align-items-center gap-1" id="btnExportRepliesExcel" title="Xuất riêng danh sách khách đã phản hồi ra Excel">
-                  <i class="bi bi-file-earmark-excel-fill"></i>
-                  <span>Xuất Excel Phản Hồi</span>
-                </a>
-                <button class="btn btn-outline-danger btn-sm py-1 d-flex align-items-center gap-1" id="btnResetReplies" type="button" title="Đặt lại trạng thái phản hồi về trống nếu muốn làm mới dữ liệu">
-                  <i class="bi bi-arrow-counterclockwise"></i>
-                  <span>Đặt lại</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Lọc và tìm kiếm phản hồi -->
-          <div class="card-body bg-light border-bottom py-2">
-            <div class="row g-2 align-items-center">
-              <div class="col-md-4">
-                <div class="input-group input-group-sm">
-                  <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
-                  <input type="text" class="form-control" id="txtSearchReplies" placeholder="Tìm theo tên, SĐT hoặc nội dung..." />
+          <!-- ACCOUNTS -->
+          <div class="panel-card" id="panelAccounts" data-panel="accounts">
+            <div class="card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h6 class="m-0 fw-bold">Quản lý Tài khoản & Kênh (OA / Web Assisted)</h6>
+                <div class="input-group input-group-sm" style="width:280px;">
+                  <input id="txtNewAccountName" class="form-control" placeholder="Tên tài khoản mới..." />
+                  <button id="btnAddAccount" class="btn btn-primary" type="button">+ Thêm</button>
                 </div>
               </div>
-              <div class="col-md-4">
-                <select class="form-select form-select-sm" id="selRepliesFilterAccount">
-                  <option value="ALL">Tất cả tài khoản Zalo nhận tin</option>
-                  <!-- Render động các nick -->
-                </select>
-              </div>
-              <div class="col-md-4 text-md-end d-flex align-items-center justify-content-md-end">
-                <span class="badge bg-success py-2 px-3 fw-bold" id="repliesCountHeaderBadge">
-                  0 khách đã phản hồi
-                </span>
-              </div>
+              <div id="accountsListContainer"></div>
             </div>
           </div>
 
-          <div class="card-body p-0">
-            <div class="table-responsive" style="max-height: 480px;">
-              <table class="table table-hover table-striped align-middle mb-0" id="repliesTable">
-                <thead class="table-light sticky-top">
-                  <tr>
-                    <th style="width: 50px;">STT</th>
-                    <th style="width: 140px;">Khách Hàng</th>
-                    <th style="width: 130px;">Số Điện Thoại</th>
-                    <th style="width: 180px;">Nhận Phản Hồi Tại Nick</th>
-                    <th>Nội Dung Ta Đã Gửi</th>
-                    <th style="width: 280px;">Nội Dung Khách Nhắn Lại</th>
-                    <th style="width: 140px;" class="text-center">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody id="repliesTableBody">
-                  <tr>
-                    <td colspan="7" class="text-center py-4 text-muted">
-                      Chưa có khách hàng nào phản hồi. Bấm "Quét kiểm tra phản hồi mới" hoặc "+ Giả lập test" để xem.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== PANEL 7: ĐỒNG BỘ QUA TRẠM TRUNG CHUYỂN CHÍNH (MASTER HUB SYNC) ==================== -->
-        <div class="card shadow-sm mb-3 panel-card" id="panelSync" data-panel="sync">
-          <div class="card-header bg-white py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <div>
-              <h6 class="m-0 fw-bold text-dark d-flex align-items-center gap-2">
-                <i class="bi bi-hdd-network-fill text-primary"></i>
-                <span>7. Trạm Trung Chuyển Chính & Đồng Bộ Đa Máy (Hỗ trợ cả khác mạng Wi-Fi)</span>
-              </h6>
-              <small class="text-muted">Các máy làm việc riêng độc lập. Khi bấm <b>"⚡ Đồng Bộ Ngay"</b>: Các máy con gửi dữ liệu về Máy Chính ➔ Máy Chính gộp & sắp xếp thành 1 bản đầy đủ ➔ Phát lại cho toàn bộ các máy!</small>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-primary btn-sm fw-bold d-flex align-items-center gap-1 px-3 py-2 shadow-sm" id="btnTriggerSyncNow" type="button">
-                <i class="bi bi-arrow-repeat"></i>
-                <span>⚡ Đồng Bộ Ngay</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="card-body">
-            <!-- Thông tin Trạm Chính & Liên kết IP -->
-            <div class="row g-3 mb-3">
-              <div class="col-md-6">
-                <div class="border rounded-3 p-3 bg-light h-100">
-                  <div class="d-flex align-items-center justify-content-between mb-2">
-                    <span class="small fw-bold text-dark">🖥️ Thông tin & Vai trò máy này:</span>
-                    <span class="badge bg-primary" id="badgeLocalSyncStatus">👑 TRẠM TRUNG CHUYỂN CHÍNH</span>
-                  </div>
-                  <div class="small mb-1">
-                    <span class="text-muted">Tên máy hiện tại:</span> <strong id="lblSyncLocalHostname">Đang tải...</strong>
-                  </div>
-                  <div class="small mb-1">
-                    <span class="text-muted">IP Internet (Khác Wi-Fi):</span> <code class="fw-bold text-danger fs-6" id="lblSyncPublicIp">Đang nhận diện...</code>
-                  </div>
-                  <div class="small mb-2">
-                    <span class="text-muted">IP Nội bộ (Cùng Wi-Fi):</span> <code class="fw-bold text-primary" id="lblSyncLocalIp">Đang nhận diện...</code>
-                  </div>
-                  <div class="d-flex align-items-center gap-2 pt-2 border-top">
-                    <span class="small text-muted">Chế độ máy này:</span>
-                    <select class="form-select form-select-sm w-auto" id="selSyncNodeRole">
-                      <option value="MASTER">👑 Máy Trạm Chính (Tổng hợp dữ liệu)</option>
-                      <option value="CLIENT">💻 Máy Trạm Con (Gửi về Máy Chính)</option>
+          <!-- CONTACTS & IMPORT -->
+          <div class="panel-card" id="panelContacts" data-panel="contacts">
+            <div class="card p-3 mb-3">
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <h6 class="fw-bold small">Nhập nhanh văn bản (SĐT | Tên | Thông tin)</h6>
+                  <textarea id="txtBulkContacts" rows="4" class="form-control form-control-sm font-monospace mb-2" placeholder="0912345678 | Nguyễn Văn An | Đơn hàng #101"></textarea>
+                  <div class="d-flex gap-2 align-items-center">
+                    <select id="selImportConsent" class="form-select form-select-sm w-auto">
+                      <option value="UNKNOWN">Consent: Chưa rõ (UNKNOWN)</option>
+                      <option value="OPTED_IN">Consent: Đã đồng ý (OPTED_IN)</option>
                     </select>
+                    <button id="btnImportText" class="btn btn-primary btn-sm" type="button">Nạp SĐT</button>
                   </div>
                 </div>
-              </div>
-
-              <!-- Liên kết IP Máy Trạm Chính -->
-              <div class="col-md-6">
-                <div class="border rounded-3 p-3 bg-light h-100">
-                  <div class="d-flex align-items-center justify-content-between mb-2">
-                    <span class="small fw-bold text-dark">🔗 Liên kết tới IP Máy Trạm Chính (Máy của bạn):</span>
-                    <span class="badge bg-success-subtle text-success border border-success-subtle" id="badgeMasterTargetHost">Trạm: LAPTOP-0SNHPCGD</span>
+                <div class="col-md-6">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h6 class="fw-bold small m-0">Upload Excel/CSV (.xlsx, .xls, .csv)</h6>
+                    <a href="/api/v2/contacts/sample-excel" class="btn btn-outline-secondary btn-sm py-0">Tải file mẫu Excel</a>
                   </div>
-                  <div class="input-group input-group-sm mb-2">
-                    <span class="input-group-text bg-white fw-semibold text-muted">IP Trạm Chính:</span>
-                    <input type="text" class="form-control fw-semibold text-primary" id="txtManualPeerIp" placeholder="VD: 58.187.250.105 hoặc 192.168.1.153" />
-                    <button class="btn btn-primary fw-semibold" id="btnAddManualPeer" type="button">🔗 Liên kết IP</button>
+                  <input id="fileExcelInput" type="file" accept=".xlsx,.xls,.csv" class="form-control form-control-sm mb-2" />
+                  <div id="excelPreviewMappingBox" class="hidden border rounded p-2 bg-light mb-2">
+                    <div class="small fw-semibold mb-1" id="lblExcelRowCount"></div>
+                    <div class="row g-1">
+                      <div class="col-4"><small>Cột SĐT</small><select id="mapColPhone" class="form-select form-select-sm"></select></div>
+                      <div class="col-4"><small>Cột Tên</small><select id="mapColName" class="form-select form-select-sm"></select></div>
+                      <div class="col-4"><small>Cột Thông tin</small><select id="mapColInfo" class="form-select form-select-sm"></select></div>
+                    </div>
                   </div>
-                  <div class="p-2 bg-white rounded-2 border small text-muted" style="font-size: 11.5px; line-height: 1.45;">
-                    <div>✅ <b>Đã nhúng sẵn IP máy chính của bạn</b> khi gửi file cho máy khác (dù máy kia dùng <b>Wi-Fi khác</b> ở nơi khác vẫn tự liên kết về máy bạn).</div>
-                    <div class="mt-1">🔄 <b>Chu trình khi bấm Đồng Bộ:</b> Máy con đẩy toàn bộ dữ liệu về IP Máy Chính ➔ Máy Chính sắp xếp lại thành 1 bản cập nhật đầy đủ nhất ➔ Gửi trả lại cho tất cả các máy.</div>
+                  <div class="d-flex gap-2 align-items-center">
+                    <select id="selExcelConsent" class="form-select form-select-sm w-auto">
+                      <option value="UNKNOWN">Consent: Chưa rõ</option>
+                      <option value="OPTED_IN">Consent: Đã đồng ý</option>
+                    </select>
+                    <button id="btnUploadExcel" class="btn btn-primary btn-sm" type="button">Upload & Nạp</button>
                   </div>
                 </div>
               </div>
             </div>
-
-            <!-- Danh sách các máy đã liên kết với Trạm Chính -->
-            <div class="border rounded-3 overflow-hidden">
-              <div class="bg-light p-2 border-bottom fw-bold small text-dark d-flex align-items-center justify-content-between">
-                <span>🌐 Danh Sách Các Máy Đang Liên Kết Với Trạm Trung Chuyển Chính (Mọi Wi-Fi):</span>
-                <span class="badge bg-primary" id="lblPeersConnectedCount">0 máy</span>
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                <input id="txtSearchTable" class="form-control form-control-sm" style="width:240px;" placeholder="Tìm SĐT, tên, ghi chú..." />
+                <div class="d-flex gap-2 align-items-center">
+                  <select id="selContactsStatusFilter" class="form-select form-select-sm w-auto">
+                    <option value="ALL">Tất cả trạng thái</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="THANH_CONG">THANH_CONG</option>
+                    <option value="REVIEW">REVIEW</option>
+                    <option value="OPTED_OUT">OPTED_OUT</option>
+                    <option value="CHAN_NGUOI_LA">CHAN_NGUOI_LA</option>
+                    <option value="KHONG_DANG_KY">KHONG_DANG_KY</option>
+                  </select>
+                  <span class="small text-muted" id="pageInfo">Trang 1/1</span>
+                  <button id="btnPrevPage" class="btn btn-outline-secondary btn-sm" type="button">‹</button>
+                  <button id="btnNextPage" class="btn btn-outline-secondary btn-sm" type="button">›</button>
+                </div>
               </div>
               <div class="table-responsive">
-                <table class="table table-hover table-sm align-middle mb-0">
-                  <thead class="table-light">
-                    <tr>
-                      <th>Tên Máy</th>
-                      <th>Địa Chỉ IP</th>
-                      <th>Kênh Kết Nối</th>
-                      <th>Lần Gặp Cuối</th>
-                      <th class="text-end">Thao Tác</th>
-                    </tr>
-                  </thead>
-                  <tbody id="tblSyncPeersBody">
-                    <tr>
-                      <td colspan="5" class="text-center py-4 text-muted small">
-                        Các máy đang chạy độc lập. Bấm <b>"⚡ Đồng Bộ Ngay"</b> để thu thập dữ liệu về Máy Chính, sắp xếp thành bản đầy đủ và đồng bộ cho các máy!
-                      </td>
-                    </tr>
-                  </tbody>
+                <table class="table table-sm table-hover align-middle mb-0">
+                  <thead class="table-light"><tr><th>#</th><th>SĐT</th><th>Tên</th><th>Consent</th><th>Trạng thái</th><th>Tags</th><th>Chi tiết</th><th class="text-end">Thao tác</th></tr></thead>
+                  <tbody id="contactsTableBody"></tbody>
                 </table>
               </div>
             </div>
           </div>
-        </div>
 
-      </main>
-    </div>
-  </div>
-
-  <!-- ==================== MODAL POPUP QUÉT MÃ QR ZALO ==================== -->
-  <div class="modal-overlay hidden" id="qrModalOverlay">
-    <div class="modal-dialog-custom card shadow-lg border-0 rounded-4 overflow-hidden">
-      <div class="card-header bg-dark text-white py-3 px-4 d-flex align-items-center justify-content-between">
-        <h6 class="m-0 fw-bold d-flex align-items-center gap-2" id="qrModalTitle">
-          <i class="bi bi-qr-code text-info fs-5"></i>
-          <span>📱 Đăng Nhập QR & Màn Hình Chạy Ngầm Zalo</span>
-        </h6>
-        <button class="btn btn-outline-light btn-sm rounded-pill px-3" id="btnCloseQrModal" type="button">
-          ✖ Đóng Form
-        </button>
-      </div>
-
-      <div class="card-body p-3 bg-light">
-        <!-- Status alert inside modal -->
-        <div class="alert alert-warning py-2 px-3 mb-2 small fw-semibold d-flex align-items-center justify-content-between" id="qrModalStatusBar">
-          <span id="qrModalStatusText">🟡 Đang chờ quét mã QR trên màn hình bên dưới...</span>
-          <button class="btn btn-sm btn-primary py-1 px-3" id="btnReloadZaloQr" type="button">
-            🔄 Tải lại / Lấy QR mới
-          </button>
-        </div>
-
-        <!-- Màn hình Live Screenshot Zalo -->
-        <div class="text-center p-2 bg-white rounded-3 border overflow-auto position-relative" style="min-height: 420px; max-height: 540px;">
-          <div id="liveZaloImageSpinner" class="position-absolute top-50 start-50 translate-middle text-muted small d-flex flex-column align-items-center gap-2">
-            <div class="spinner-border text-primary" role="status"></div>
-            <span class="fw-semibold">Đang kết nối khung hình xem ngầm Zalo siêu tốc...</span>
+          <!-- CONSENTS -->
+          <div class="panel-card" id="panelConsents" data-panel="consents">
+            <div class="card p-3">
+              <h6 class="fw-bold mb-2">Quản lý Đồng ý nhận tin (Opt-in) & Danh sách từ chối (Opt-out)</h6>
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="table-light"><tr><th>SĐT</th><th>Khách hàng</th><th>Trạng thái</th><th>Nguồn</th><th>Cập nhật</th><th class="text-end">Thao tác</th></tr></thead>
+                  <tbody id="tblConsentsBody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <img id="liveZaloImage" src="" alt="Màn hình Zalo Web" style="max-width: 100%; height: auto; cursor: crosshair; display: none;" title="Click vào màn hình để tương tác trực tiếp với Zalo" />
-        </div>
-        <small class="text-muted d-block text-center mt-2" style="font-size: 11.5px;">
-          💡 Mẹo: Bạn có thể click chuột trực tiếp vào ảnh trên nếu Zalo hiện nút "Lấy mã QR mới" hoặc cần chọn lại tài khoản.
-        </small>
+
+          <!-- TEMPLATES -->
+          <div class="panel-card" id="panelTemplates" data-panel="templates">
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div class="card p-3">
+                  <h6 class="fw-bold mb-2">Soạn & Kiểm tra mẫu (hỗ trợ biến {ten}, {thong_tin}, không spintax)</h6>
+                  <input id="txtTemplateName" class="form-control form-control-sm mb-2" placeholder="Tên mẫu tin nhắn..." />
+                  <select id="selTemplateChannel" class="form-select form-select-sm mb-2">
+                    <option value="zalo_oa">Zalo OA API (Ưu tiên)</option>
+                    <option value="web_assisted">Web Assisted</option>
+                  </select>
+                  <textarea id="txtTemplate" rows="4" class="form-control form-control-sm mb-2" placeholder="Xin chào {ten}, mình gửi thông tin: {thong_tin}"></textarea>
+                  <div class="d-flex gap-2 mb-2">
+                    <button id="btnPreviewTemplate" class="btn btn-outline-secondary btn-sm" type="button">Xem trước & Kiểm tra biến</button>
+                    <button id="btnCreateTemplate" class="btn btn-primary btn-sm" type="button">Lưu bản nháp</button>
+                  </div>
+                  <div class="small text-muted mb-2" id="lblTemplateValidation"></div>
+                  <div class="p-2 border rounded bg-light small font-monospace" id="previewBox" style="white-space:pre-wrap"></div>
+                  <hr />
+                  <label class="small fw-bold mb-1">Ảnh đính kèm</label>
+                  <input id="fileImageInput" type="file" accept="image/*" multiple class="form-control form-control-sm mb-2" />
+                  <div id="attachedImagesContainer" class="d-flex flex-wrap gap-2"></div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card p-3">
+                  <h6 class="fw-bold mb-2">Danh sách Mẫu & Phiên bản</h6>
+                  <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                      <thead class="table-light"><tr><th>Tên</th><th>Kênh</th><th>Trạng thái</th><th>Nội dung</th><th class="text-end">Thao tác</th></tr></thead>
+                      <tbody id="tblTemplatesBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CAMPAIGNS -->
+          <div class="panel-card" id="panelCampaigns" data-panel="campaigns">
+            <div class="card p-3 mb-3">
+              <div class="d-flex gap-2 align-items-center flex-wrap">
+                <input id="txtCampaignName" class="form-control form-control-sm" style="width:260px;" placeholder="Tên chiến dịch mới..." />
+                <select id="selCampaignChannel" class="form-select form-select-sm w-auto">
+                  <option value="web_assisted">Kênh Web Assisted</option>
+                  <option value="zalo_oa">Zalo OA API</option>
+                  <option value="mock_sandbox">Mock Sandbox (Kiểm thử)</option>
+                </select>
+                <button id="btnCreateCampaign" class="btn btn-primary btn-sm" type="button">+ Tạo bản nháp chiến dịch</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="table-light"><tr><th>Chiến dịch</th><th>Trạng thái</th><th>Tiến độ</th><th>Lý do dừng / ghi chú</th><th class="text-end">Điều khiển</th></tr></thead>
+                  <tbody id="tblCampaignsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TASKS -->
+          <div class="panel-card" id="panelTasks" data-panel="tasks">
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="m-0 fw-bold">Quản lý Tác vụ & Hàng chờ REVIEW</h6>
+                <select id="selTaskStatusFilter" class="form-select form-select-sm w-auto">
+                  <option value="ALL">Tất cả trạng thái</option>
+                  <option value="REVIEW">Chỉ xem REVIEW</option>
+                  <option value="PENDING">PENDING</option>
+                  <option value="COMPLETED">COMPLETED</option>
+                  <option value="FAILED">FAILED</option>
+                </select>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="table-light"><tr><th>SĐT</th><th>Khách hàng</th><th>Trạng thái</th><th>Chi tiết</th><th class="text-end">Xử lý REVIEW</th></tr></thead>
+                  <tbody id="tblTasksBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- INBOX -->
+          <div class="panel-card" id="panelInbox" data-panel="inbox">
+            <div class="card">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="m-0 fw-bold">Hộp thư Hội thoại (ID ổn định & Xác minh SĐT)</h6>
+                <button id="btnCheckReplies" class="btn btn-outline-success btn-sm" type="button">Quét phản hồi mới</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead class="table-light"><tr><th>Khách hàng</th><th>SĐT</th><th>Nick Zalo</th><th>Tin nhắn cuối</th><th class="text-end">Thao tác</th></tr></thead>
+                  <tbody id="repliesTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- DEVICES & DELTA SYNC -->
+          <div class="panel-card" id="panelDevices" data-panel="devices">
+            <div class="card p-3 mb-3">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                <div>
+                  <h6 class="m-0 fw-bold">Thiết bị & Đồng bộ Delta xác thực</h6>
+                  <div class="small text-muted" id="syncMetaSummary"></div>
+                </div>
+                <div class="d-flex gap-2">
+                  <button id="btnPairDevice" class="btn btn-outline-primary btn-sm" type="button">+ Tạo mã ghép thiết bị</button>
+                  <button id="btnRunDeltaSync" class="btn btn-primary btn-sm" type="button">⚡ Chạy Delta Sync</button>
+                </div>
+              </div>
+              <div id="pairingCodeResult" class="alert alert-info py-2 small hidden mb-2"></div>
+              <table class="table table-sm mb-0">
+                <thead class="table-light"><tr><th>Thiết bị</th><th>Vai trò</th><th>Trạng thái</th><th>Cursor</th><th>Lần cuối</th><th class="text-end">Thao tác</th></tr></thead>
+                <tbody id="tblDevicesBody"></tbody>
+              </table>
+            </div>
+            <div class="card p-3">
+              <h6 class="fw-bold mb-2">Xung đột đồng bộ chờ duyệt</h6>
+              <table class="table table-sm mb-0">
+                <thead class="table-light"><tr><th>Entity</th><th>Bản Local</th><th>Bản Remote</th><th class="text-end">Quyết định</th></tr></thead>
+                <tbody id="tblConflictsBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- MONITOR & AUDIT -->
+          <div class="panel-card" id="panelMonitor" data-panel="monitor">
+            <div class="row g-2 mb-3" id="systemMetricsCards"></div>
+            <div class="card">
+              <div class="card-header"><h6 class="m-0 fw-bold">Nhật ký Kiểm toán Bảo mật (Audit Logs - Đã che PII)</h6></div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead class="table-light"><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Tài nguyên</th><th>Chi tiết</th></tr></thead>
+                  <tbody id="tblAuditLogsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- BACKUPS -->
+          <div class="panel-card" id="panelBackups" data-panel="backups">
+            <div class="card p-3">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="m-0 fw-bold">Trung tâm Sao lưu Mã hóa (AES-256-GCM + SHA-256) & Phục hồi</h6>
+                <button id="btnCreateBackupNow" class="btn btn-primary btn-sm" type="button">+ Tạo bản sao lưu ngay</button>
+              </div>
+              <table class="table table-sm table-hover mb-0">
+                <thead class="table-light"><tr><th>Tên file</th><th>Loại</th><th>Dung lượng</th><th>Thời gian</th><th>Kiểm tra</th><th class="text-end">Thao tác</th></tr></thead>
+                <tbody id="tblBackupsBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- SETTINGS & RBAC -->
+          <div class="panel-card" id="panelSettings" data-panel="settings">
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div class="card p-3">
+                  <h6 class="fw-bold mb-2">Cài đặt Giãn cách An toàn & Tuân thủ</h6>
+                  <div class="speed-preset-grid mb-2">
+                    <button type="button" class="speed-preset-item" data-safe-preset="STANDARD"><div class="fw-bold small">⚖️ Chuẩn</div><small class="text-muted">8–15s / tin</small></button>
+                    <button type="button" class="speed-preset-item active" data-safe-preset="SAFE"><div class="fw-bold small">🛡️ An Toàn</div><small class="text-muted">12–25s / tin</small></button>
+                    <button type="button" class="speed-preset-item" data-safe-preset="CAUTIOUS"><div class="fw-bold small">🐢 Thận Trọng</div><small class="text-muted">20–40s / tin</small></button>
+                  </div>
+                  <div class="row g-2 mb-2">
+                    <div class="col-3"><small>Min (s ≥ 5)</small><input id="numMinDelay" type="number" min="5" class="form-control form-control-sm" value="12" /></div>
+                    <div class="col-3"><small>Max (s)</small><input id="numMaxDelay" type="number" min="5" class="form-control form-control-sm" value="25" /></div>
+                    <div class="col-3"><small>Chặng (SĐT)</small><input id="numBatchSize" type="number" min="1" class="form-control form-control-sm" value="15" /></div>
+                    <div class="col-3"><small>Nghỉ chặng (s)</small><input id="numBatchPause" type="number" min="30" class="form-control form-control-sm" value="120" /></div>
+                  </div>
+                  <div class="form-check mb-1"><input id="chkRequireOptIn" type="checkbox" class="form-check-input" checked /><label for="chkRequireOptIn" class="form-check-label small">Bắt buộc Opt-in Consent trước khi gửi</label></div>
+                  <div class="form-check mb-1"><input id="chkUsePhoneCache" type="checkbox" class="form-check-input" checked /><label for="chkUsePhoneCache" class="form-check-label small">Dùng Cache SĐT chưa đăng ký</label></div>
+                  <div class="form-check mb-2"><input id="chkActiveHoursEnabled" type="checkbox" class="form-check-input" /><label for="chkActiveHoursEnabled" class="form-check-label small">Giới hạn khung giờ gửi</label></div>
+                  <div class="row g-2 mb-3">
+                    <div class="col-6"><input id="tmActiveStart" type="time" class="form-control form-control-sm" value="08:00" /></div>
+                    <div class="col-6"><input id="tmActiveEnd" type="time" class="form-control form-control-sm" value="21:30" /></div>
+                  </div>
+                  <button id="btnSaveSettings" class="btn btn-primary btn-sm" type="button">💾 Lưu cài đặt</button>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="card p-3 mb-3">
+                  <h6 class="fw-bold mb-2">Xác thực 2 lớp (TOTP MFA)</h6>
+                  <button id="btnSetupMfa" class="btn btn-outline-primary btn-sm" type="button">Khởi tạo TOTP MFA cho tài khoản đang đăng nhập</button>
+                  <div id="mfaSetupBox" class="hidden mt-2 p-2 border rounded bg-light">
+                    <div class="small">Secret Key (nhập vào Authenticator): <code id="lblMfaSecret" class="fw-bold"></code></div>
+                    <div class="input-group input-group-sm mt-2">
+                      <input id="txtMfaConfirmCode" class="form-control" placeholder="Mã 6 số..." />
+                      <button id="btnVerifyMfa" class="btn btn-success" type="button">Kích hoạt MFA</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="card p-3 hidden" id="adminUsersCard">
+                  <h6 class="fw-bold mb-2">Người dùng & Phân quyền RBAC</h6>
+                  <div class="input-group input-group-sm mb-2">
+                    <input id="txtNewUsername" class="form-control" placeholder="Username..." />
+                    <input id="txtNewUserPassword" type="password" class="form-control" placeholder="Mật khẩu..." />
+                    <select id="selNewUserRole" class="form-select"><option value="operator">operator</option><option value="viewer">viewer</option><option value="admin">admin</option></select>
+                    <button id="btnCreateUser" class="btn btn-primary" type="button">+ Tạo</button>
+                  </div>
+                  <table class="table table-sm mb-0"><thead class="table-light"><tr><th>User</th><th>Tên</th><th>Role</th><th>MFA</th><th>TT</th></tr></thead><tbody id="tblUsersBody"></tbody></table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
-  </div>
 
-  <!-- Main Application Script -->
-  <script src="/app.js"></script>
-</body>
+    <!-- QR / SCREENSHOT MODAL -->
+    <div class="modal-overlay hidden" id="qrModalOverlay">
+      <div class="modal-dialog-custom card overflow-hidden">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2 px-3">
+          <span class="fw-bold small">📱 Xem phiên Zalo (Chỉ chụp khi popup đang mở)</span>
+          <button id="btnCloseQrModal" class="btn btn-outline-light btn-sm py-0 px-2" type="button">✖ Đóng</button>
+        </div>
+        <div class="card-body p-3">
+          <div class="alert alert-warning py-2 px-3 small d-flex justify-content-between align-items-center mb-2">
+            <span id="qrModalStatusText">🟡 Đang chờ kết nối...</span>
+            <button id="btnReloadZaloQr" class="btn btn-primary btn-sm py-0 px-2" type="button">🔄 Tải lại</button>
+          </div>
+          <div class="text-center border rounded p-2 position-relative" style="min-height:360px;">
+            <div id="liveZaloImageSpinner" class="small text-muted py-5">Đang tải khung hình...</div>
+            <img id="liveZaloImage" src="" alt="Zalo Screen" style="max-width:100%;cursor:crosshair;display:none;" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTH MODAL (FIRST-RUN SETUP / LOGIN) -->
+    <div class="modal-overlay hidden" id="authOverlay">
+      <div class="card p-4 shadow-lg" style="width:100%;max-width:420px;">
+        <h5 class="fw-bold mb-3" id="authModalTitle">🔐 Đăng nhập ToolGuiZalo Pro V2</h5>
+        <div id="authErrorBox" class="alert alert-danger py-2 small hidden"></div>
+        <form id="authForm">
+          <div class="mb-2">
+            <label class="form-label small fw-semibold">Tên đăng nhập</label>
+            <input id="authUsername" class="form-control" value="admin" required />
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-semibold">Mật khẩu (tối thiểu 6 ký tự)</label>
+            <input id="authPassword" type="password" class="form-control" required />
+          </div>
+          <div class="mb-3 hidden" id="authMfaWrap">
+            <label class="form-label small fw-semibold">Mã TOTP MFA</label>
+            <input id="authTotpCode" class="form-control" placeholder="6 chữ số" />
+          </div>
+          <button id="btnAuthSubmit" type="submit" class="btn btn-primary w-100 fw-semibold">Đăng nhập</button>
+        </form>
+      </div>
+    </div>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
 </html>

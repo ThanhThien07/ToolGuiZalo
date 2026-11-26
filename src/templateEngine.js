@@ -1,38 +1,23 @@
 /**
- * Bộ trộn nội dung tin nhắn (Template + Spintax + Cá nhân hóa từng SĐT)
+ * Bộ dựng nội dung tin nhắn cá nhân hóa V2:
+ * - Loại bỏ cơ chế biến đổi nội dung Spintax né phát hiện spam theo định hướng V2.
+ * - Giữ cá nhân hóa hợp lệ qua biến ({ten}, {sdt}, {thong_tin}, {ghi_chu}, cột Excel mở rộng).
+ * - Hỗ trợ kiểm tra biến thiếu và phát hiện dấu hiệu nội dung không hợp lệ trước khi duyệt mẫu.
  */
 
-/**
- * Xử lý cú pháp Spintax: "{Xin chào|Chào|Hi} {anh/chị|bạn}"
- * Hỗ trợ nhiều cụm spintax trong cùng 1 tin nhắn
- * @param {string} text
- * @returns {string}
- */
-function processSpintax(text) {
-  if (!text) return '';
-  // Tìm các cụm {a|b|c} có chứa dấu | (để phân biệt với biến {ten})
-  return text.replace(/\{([^{}]*\|[^{}]*)\}/g, (_, group) => {
-    const options = group.split('|').map((s) => s.trim()).filter(Boolean);
-    if (options.length === 0) return '';
-    const randomIndex = Math.floor(Math.random() * options.length);
-    return options[randomIndex];
-  });
+function slugifyKey(str) {
+  return String(str || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
 }
 
-/**
- * Tạo nội dung tin nhắn hoàn chỉnh cho 1 khách hàng
- * @param {string} template Mẫu tin nhắn chung
- * @param {object} contact Thông tin liên hệ (phone, name, info, note, customMessage, extraFields...)
- * @param {object} options Tùy chọn (useCustomMessageFirst: ưu tiên cột nội dung riêng nếu có)
- * @returns {string}
- */
-function renderMessage(template, contact = {}, options = { useCustomMessageFirst: true }) {
-  let baseText = template || '';
-  if (options.useCustomMessageFirst && contact.customMessage && String(contact.customMessage).trim()) {
-    baseText = String(contact.customMessage).trim();
-  }
-
-  // Tạo bảng ánh xạ biến không phân biệt hoa thường / dấu
+function buildVariablesMap(contact = {}) {
   const variables = {
     sdt: contact.phone || '',
     phone: contact.phone || '',
@@ -50,19 +35,10 @@ function renderMessage(template, contact = {}, options = { useCustomMessageFirst
     noi_dung: contact.customMessage || ''
   };
 
-  // Bổ sung mọi cột mở rộng từ file Excel (extraFields)
   if (contact.extraFields && typeof contact.extraFields === 'object') {
     for (const [key, val] of Object.entries(contact.extraFields)) {
       const cleanKey = key.trim();
-      const slugKey = cleanKey
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/g, 'd')
-        .replace(/[^a-z0-9_]/g, '_')
-        .replace(/_+/g, '_')
-        .replace(/^_|_$/g, '');
-
+      const slugKey = slugifyKey(cleanKey);
       variables[cleanKey] = val ?? '';
       variables[cleanKey.toLowerCase()] = val ?? '';
       if (slugKey) {
@@ -70,21 +46,65 @@ function renderMessage(template, contact = {}, options = { useCustomMessageFirst
       }
     }
   }
+  return variables;
+}
 
-  // 1. Xử lý Spintax trước ({Chào|Xin chào})
-  let result = processSpintax(baseText);
+/**
+ * Kiểm tra các biến được dùng trong mẫu và phát hiện biến chưa có dữ liệu.
+ * @param {string} template
+ * @param {object} contact
+ * @returns {{ usedVariables: string[], missingVariables: string[], hasObfuscationSyntax: boolean }}
+ */
+function inspectTemplate(template, contact = {}) {
+  const text = String(template || '');
+  const variables = buildVariablesMap(contact);
+  const usedVariables = [];
+  const missingVariables = [];
+  const hasObfuscationSyntax = /\{[^{}]*\|[^{}]*\}/.test(text);
 
-  // 2. Thay thế biến {ten_bien}
-  result = result.replace(/\{([^{}|]+)\}/g, (match, rawKey) => {
+  const re = /\{([^{}]+)\}/g;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    const rawKey = match[1].trim();
+    if (rawKey.includes('|')) continue;
+    if (!usedVariables.includes(rawKey)) usedVariables.push(rawKey);
+    const lowerKey = rawKey.toLowerCase();
+    const slugKey = slugifyKey(lowerKey);
+    const val =
+      variables[rawKey] ?? variables[lowerKey] ?? variables[slugKey];
+    if (val === undefined || String(val).trim() === '') {
+      if (!missingVariables.includes(rawKey)) {
+        missingVariables.push(rawKey);
+      }
+    }
+  }
+
+  return { usedVariables, missingVariables, hasObfuscationSyntax };
+}
+
+/**
+ * Tạo nội dung tin nhắn hoàn chỉnh cho 1 khách hàng (chỉ thay thế biến cá nhân hóa, không trộn spintax né spam).
+ * @param {string} template Mẫu tin nhắn chuẩn
+ * @param {object} contact Thông tin liên hệ
+ * @param {object} options Tùy chọn (useCustomMessageFirst: ưu tiên nội dung riêng nếu có)
+ * @returns {string}
+ */
+function renderMessage(template, contact = {}, options = { useCustomMessageFirst: true }) {
+  let baseText = template || '';
+  if (options.useCustomMessageFirst && contact.customMessage && String(contact.customMessage).trim()) {
+    baseText = String(contact.customMessage).trim();
+  }
+
+  const variables = buildVariablesMap(contact);
+
+  const result = String(baseText).replace(/\{([^{}]+)\}/g, (match, rawKey) => {
     const key = rawKey.trim();
+    if (key.includes('|')) {
+      // Nếu còn sót mẫu cũ dạng {a|b}, chỉ lấy phương án đầu tiên mang tính chuẩn hóa, không random né lọc.
+      return key.split('|')[0].trim();
+    }
     const lowerKey = key.toLowerCase();
-    const slugKey = lowerKey
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/[^a-z0-9_]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '');
+    const slugKey = slugifyKey(lowerKey);
 
     if (variables[key] !== undefined) return String(variables[key]);
     if (variables[lowerKey] !== undefined) return String(variables[lowerKey]);
@@ -96,7 +116,8 @@ function renderMessage(template, contact = {}, options = { useCustomMessageFirst
 }
 
 module.exports = {
-  processSpintax,
-  renderMessage
+  renderMessage,
+  inspectTemplate,
+  buildVariablesMap,
+  slugifyKey
 };
-

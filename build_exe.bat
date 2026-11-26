@@ -1,39 +1,27 @@
 @echo off
 rem ================================================================
-rem ToolGuiZalo Pro - Script dong goi 1 file duy nhat
+rem ToolGuiZalo Pro V2 - Script dong goi Sach (Khong dong goi data/secrets/profile)
+rem Uu tien Inno Setup neu co; neu khong se tao SFX sach ben ngoai Program Files.
 rem ================================================================
 cd /d "%~dp0"
 
 echo ================================================================
-echo       DANG DONG GOI TOOLGUIZALO THANH 1 FILE DUY NHAT
+echo       DANG DONG GOI TOOLGUIZALO PRO V2 (CLEAN BUILD)
 echo ================================================================
 echo.
 
 if not exist "dist" mkdir "dist"
-if exist "CHAY_TOOL_NGAY.bat" del /f /q "CHAY_TOOL_NGAY.bat"
-if exist "ToolGuiZalo_Portable.rar" del /f /q "ToolGuiZalo_Portable.rar"
-if exist "ToolGuiZalo_Portable.zip" del /f /q "ToolGuiZalo_Portable.zip"
-if exist "ToolGuiZalo_Setup.exe" del /f /q "ToolGuiZalo_Setup.exe"
-if exist "dist\ToolGuiZalo_Installer.exe" del /f /q "dist\ToolGuiZalo_Installer.exe"
+if exist "dist\ToolGuiZalo_V2_Setup.exe" del /f /q "dist\ToolGuiZalo_V2_Setup.exe"
 
-rem 1. Tao 1 file .exe duy nhat (tu bung ngam va chay luon, khong lo code)
-"C:\Program Files\WinRAR\Rar.exe" a -sfx -s -r -z"sfx_config.txt" -x"user_data\*" -x".agents\*" -x"graphify-out\*" -x"bin\*" -x".git\*" -x"dist\*" -x"*.zip" -x"*.rar" -x"ToolGuiZalo*.exe" "dist\ToolGuiZalo_Installer.exe" node.exe server.js start.bat package.json data public src uploads node_modules
-
-if exist "dist\ToolGuiZalo_Installer.exe" (
-    copy /y "dist\ToolGuiZalo_Installer.exe" "ToolGuiZalo_Setup.exe" >nul
-
-    rem 2. Boc DUY NHAT 1 file ToolGuiZalo_Setup.exe vao .rar de gui qua Zalo (khong chua file code nao ben trong .rar)
-    "C:\Program Files\WinRAR\Rar.exe" a -m0 -ep "ToolGuiZalo_Portable.rar" "ToolGuiZalo_Setup.exe" >nul
-
-    echo.
-    echo ================================================================
-    echo [THANH CONG]:
-    echo   1. ToolGuiZalo_Setup.exe    - 1 file .exe duy nhat, bam la chay!
-    echo   2. ToolGuiZalo_Portable.rar - Ben trong CHI CO DUY NHAT 1 file ToolGuiZalo_Setup.exe - Dung de gui qua Zalo
-    echo ================================================================
+if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
+    echo [*] Phat hien Inno Setup 6 - dang bien dich bo cai dat chuan...
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\ToolGuiZalo.iss"
 ) else (
-    echo.
-    echo [LOI]: Dong goi that bai.
+    echo [!] Khong tim thay Inno Setup 6. Dang tao goi portable sach khong kem data/user_data/secrets...
+    if exist "C:\Program Files\WinRAR\Rar.exe" (
+        "C:\Program Files\WinRAR\Rar.exe" a -sfx -s -r -z"sfx_config.txt" -x"data\*" -x"user_data\*" -x"uploads\*" -x".agents\*" -x"graphify-out\*" -x"bin\*" -x".git\*" -x"dist\*" -x"*.zip" -x"*.rar" -x"ToolGuiZalo*.exe" -x".env" "dist\ToolGuiZalo_V2_Setup.exe" node.exe server.js start.bat package.json .env.example src public scripts node_modules
+    )
 )
 
-
+echo.
+echo [HOAN TAT] Kiem tra thu muc dist\
