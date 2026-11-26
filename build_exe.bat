@@ -1,27 +1,36 @@
 @echo off
 rem ================================================================
-rem ToolGuiZalo Pro V2 - Script dong goi Sach (Khong dong goi data/secrets/profile)
-rem Uu tien Inno Setup neu co; neu khong se tao SFX sach ben ngoai Program Files.
+rem ToolGuiZalo Pro V2 - Dong goi thanh 1 file duy nhat ToolGuiZalo_Setup.exe
+rem Khong dong goi data/user_data/uploads/.env de khong lam mat du lieu may khac
 rem ================================================================
 cd /d "%~dp0"
 
 echo ================================================================
-echo       DANG DONG GOI TOOLGUIZALO PRO V2 (CLEAN BUILD)
+echo     DONG GOI TOOLGUIZALO PRO V2 THANH 1 FILE DUY NHAT (.EXE)
 echo ================================================================
 echo.
 
-if not exist "dist" mkdir "dist"
-if exist "dist\ToolGuiZalo_V2_Setup.exe" del /f /q "dist\ToolGuiZalo_V2_Setup.exe"
+if exist "dist" rmdir /s /q "dist"
+if exist "ToolGuiZalo_Portable.rar" del /f /q "ToolGuiZalo_Portable.rar"
+if exist "ToolGuiZalo_Portable.zip" del /f /q "ToolGuiZalo_Portable.zip"
+if exist "ToolGuiZalo_Setup.exe" del /f /q "ToolGuiZalo_Setup.exe"
 
-if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
-    echo [*] Phat hien Inno Setup 6 - dang bien dich bo cai dat chuan...
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\ToolGuiZalo.iss"
+"C:\Program Files\WinRAR\Rar.exe" a -sfx -s -r -z"sfx_config.txt" ^
+  -x"data\*" -x"user_data\*" -x"uploads\*" -x"tests\*" -x"docs\*" -x"installer\*" ^
+  -x".agents\*" -x"graphify-out\*" -x".git\*" -x".github\*" -x"dist\*" ^
+  -x"*.zip" -x"*.rar" -x"ToolGuiZalo*.exe" -x"ToolGuiZalo_Pro_V2_Roadmap.md" -x".env" ^
+  "ToolGuiZalo_Setup.exe" ^
+  node.exe server.js start.bat package.json package-lock.json .env.example README.md src public scripts node_modules
+
+if exist "ToolGuiZalo_Setup.exe" (
+    echo.
+    echo ================================================================
+    echo [THANH CONG]: Da tao 1 file duy nhat: ToolGuiZalo_Setup.exe
+    echo - Tai ve bam dup la tu bung va tu dong mo Terminal + Web App!
+    echo - Du lieu nguoi dung duoc bao toan tai %%LOCALAPPDATA%%\ToolGuiZalo
+    echo ================================================================
 ) else (
-    echo [!] Khong tim thay Inno Setup 6. Dang tao goi portable sach khong kem data/user_data/secrets...
-    if exist "C:\Program Files\WinRAR\Rar.exe" (
-        "C:\Program Files\WinRAR\Rar.exe" a -sfx -s -r -z"sfx_config.txt" -x"data\*" -x"user_data\*" -x"uploads\*" -x".agents\*" -x"graphify-out\*" -x"bin\*" -x".git\*" -x"dist\*" -x"*.zip" -x"*.rar" -x"ToolGuiZalo*.exe" -x".env" "dist\ToolGuiZalo_V2_Setup.exe" node.exe server.js start.bat package.json .env.example src public scripts node_modules
-    )
+    echo.
+    echo [LOI]: Dong goi that bai!
+    exit /b 1
 )
-
-echo.
-echo [HOAN TAT] Kiem tra thu muc dist\
